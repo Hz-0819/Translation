@@ -5,8 +5,10 @@ import { createBlankPage, renderSample, renderPdf, renderWord, renderImage } fro
 import { createInkLayer } from './ink.js';
 import { lookupWord, lookupCompleteWord, demoSentenceTranslation, normalizeWord } from './dictionary.js';
 import { selectedText, wordAtPoint, wordFromTarget, isSentenceSelection } from './selection.js';
-import { bookmarkStorageKey, headingLevel, normalizeBookmarkIndexes } from './navigation.js';
-import { formatTimer, layerStorageKey, mistakeStorageKey, normalizeLayers, normalizePageNotes, noteStorageKey } from './study.js';
+import { bookmarkStorageKey, normalizeBookmarkIndexes } from './navigation.js';
+import { formatTimer, layerStorageKey, normalizeLayers, normalizePageNotes, noteStorageKey } from './study.js';
+import { addExcerpt, addMistakeEntry, addOutlineNode, createMistakeBook, defaultWorkspaceState, normalizeWorkspaceState, tracePageIndexes } from './workspace-state.js';
+import { createToolInstance, defaultToolInstances, normalizeToolInstances, toolDefinition, toolMode } from './tool-registry.js';
 
 const icon = name => `<i class="ph ph-${name}" aria-hidden="true"></i>`;
 
@@ -14,49 +16,58 @@ document.querySelector('#app').innerHTML = `
   <div class="app-shell">
     <header class="topbar">
       <a class="brand" href="#" aria-label="纸上词间首页"><span class="brand-mark">P<span>／</span>L</span><span><b>纸上词间</b><small>PAPERLINGO</small></span></a>
-      <div class="doc-title"><span class="status-dot"></span><span id="docTitle">阅读练习 · Ways of Seeing</span><small id="saveState">仅保存在本机</small></div>
+      <div class="topbar-center">
+        <nav class="primary-tabs" aria-label="主功能"><button data-app-view="library" class="active">${icon('folder-open')}<span>资料</span></button><button data-app-view="mistake-library">${icon('notebook')}<span>错题本</span></button></nav>
+        <div class="doc-title" id="documentTitleBlock" hidden><span class="status-dot"></span><span id="docTitle">阅读练习 · Ways of Seeing</span><small id="saveState">仅保存在本机</small></div>
+      </div>
       <label class="upload-button"><input id="fileInput" type="file" accept=".pdf,.doc,.docx,image/png,image/jpeg" hidden><span>＋</span> 上传试卷</label>
     </header>
 
-    <main class="workspace">
+    <main class="app-main">
+      <section class="home-view library-view" id="libraryView">
+        <div class="home-inner"><header class="home-heading"><div><span>LIBRARY</span><h1>资料</h1><p>上传试卷、讲义或创建空白笔记，所有学习内容都从这里开始。</p></div><label class="home-upload"><input type="file" data-library-upload accept=".pdf,.doc,.docx,image/png,image/jpeg" hidden>${icon('plus')} 上传资料</label></header><div class="resource-toolbar"><label>${icon('magnifying-glass')}<input id="resourceSearch" placeholder="搜索资料"></label><button id="newBlankDocument">${icon('file-plus')} 新建空白笔记</button></div><div class="resource-grid" id="resourceGrid"></div></div>
+      </section>
+      <section class="home-view mistake-library-view" id="mistakeLibraryView" hidden>
+        <div class="home-inner"><header class="home-heading"><div><span>REVIEW</span><h1>错题本</h1><p>跨文件收集错题，按自己的复习方式分类整理。</p></div><button class="home-upload" id="createMistakeBookButton">${icon('plus')} 新建错题本</button></header><div class="mistake-books-grid" id="mistakeBooksGrid"></div></div>
+      </section>
+      <section class="workspace" id="documentWorkspace" hidden>
       <nav class="toolrail" aria-label="试卷工具">
         <div class="tool-group history-group">
+          <button class="tool icon-only" id="backLibraryButton" aria-label="返回资料">${icon('arrow-left')}</button>
           <button class="tool icon-only" id="pagesButton" aria-label="页面缩略图">${icon('squares-four')}</button>
           <button class="tool icon-only" id="undoButton" aria-label="撤销">${icon('arrow-u-up-left')}</button>
           <button class="tool icon-only" id="redoButton" aria-label="重做">${icon('arrow-u-up-right')}</button>
         </div>
         <i class="rail-divider"></i>
-        <div class="tool-group mode-group">
-          <button class="tool active" data-mode="ink">${icon('pen-nib')}<span>钢笔</span></button>
-          <button class="tool" data-mode="highlight">${icon('highlighter')}<span>荧光笔</span></button>
-          <button class="tool" data-mode="eraser">${icon('eraser')}<span>橡皮</span></button>
-          <button class="tool" data-mode="lasso">${icon('selection')}<span>套索</span></button>
-          <button class="tool lookup-tool" data-mode="lookup">${icon('translate')}<span>查词</span></button>
-          <button class="tool" data-mode="pan">${icon('hand')}<span>浏览</span></button>
-        </div>
+        <div class="tool-group mode-group" id="toolInstanceGroup"></div>
         <i class="rail-divider"></i>
         <div class="tool-group utility-group">
+          <button class="tool utility-action" id="addToolButton" aria-label="添加工具">${icon('plus-circle')}<span>添加</span></button>
           <button class="tool utility-action" id="layersButton" aria-label="管理图层">${icon('stack')}<span>图层</span></button>
-          <button class="tool utility-action" id="mistakesButton" aria-label="打开错题本">${icon('notebook')}<span>错题本</span></button>
           <button class="tool utility-action" id="timerButton" aria-label="考试计时器" aria-controls="timerPopover" aria-expanded="false">${icon('timer')}<span>计时</span></button>
-          <button class="tool utility-action" id="settingsButton" aria-label="笔刷设置" aria-controls="toolPopover" aria-expanded="false" title="调整当前笔的粗细、浓度和颜色">${icon('sliders-horizontal')}<span>笔刷</span></button>
+          <button class="tool utility-action" id="settingsButton" aria-label="常用工具设置">${icon('gear-six')}<span>设置</span></button>
           <button class="tool utility-action clear-tool" id="clearButton" aria-label="清空全部标注" title="清空整份试卷的手写标注">${icon('trash')}<span>清空全部</span></button>
         </div>
       </nav>
 
-      <section class="tool-popover" id="toolPopover" hidden aria-label="笔刷设置">
-        <header><div><span>笔刷设置</span><strong id="settingsTitle">钢笔</strong></div><button id="closeSettings" aria-label="关闭">${icon('x')}</button></header>
-        <label class="setting-row"><span>粗细</span><output id="widthValue">2.4</output><input id="widthRange" type="range" min="1" max="20" step="0.5" value="2.4"></label>
-        <label class="setting-row"><span>浓度</span><output id="opacityValue">100%</output><input id="opacityRange" type="range" min="15" max="100" step="5" value="100"></label>
-        <div class="palette-label">颜色</div>
-        <div class="color-palette" id="colorPalette">
+      <section class="tool-popover" id="toolPopover" hidden aria-label="工具设置">
+        <header><div><span>工具设置</span><strong id="settingsTitle">钢笔</strong></div><button id="closeSettings" aria-label="关闭">${icon('x')}</button></header>
+        <div id="toolPicker" hidden><p class="picker-hint">选择一种工具，创建后会加入常用栏。</p><div class="tool-type-grid" id="toolTypeGrid"></div></div>
+        <div id="instanceSettings">
+          <label class="setting-row"><span>粗细</span><output id="widthValue">2.4</output><input id="widthRange" type="range" min="1" max="20" step="0.5" value="2.4"></label>
+          <label class="setting-row"><span>浓度</span><output id="opacityValue">100%</output><input id="opacityRange" type="range" min="15" max="100" step="5" value="100"></label>
+          <div class="palette-label">颜色</div>
+          <div class="color-palette" id="colorPalette">
           <button class="swatch active" data-color="#173c36" style="--swatch:#173c36" aria-label="墨绿"></button>
           <button class="swatch" data-color="#1d4ed8" style="--swatch:#1d4ed8" aria-label="蓝色"></button>
           <button class="swatch" data-color="#dc3c3c" style="--swatch:#dc3c3c" aria-label="红色"></button>
           <button class="swatch" data-color="#8b5cf6" style="--swatch:#8b5cf6" aria-label="紫色"></button>
           <button class="swatch" data-color="#e2ef78" style="--swatch:#e2ef78" aria-label="黄色"></button>
           <button class="swatch" data-color="#86d8c9" style="--swatch:#86d8c9" aria-label="薄荷色"></button>
+          </div>
+          <label class="pressure-setting"><input id="pressureToggle" type="checkbox"><span>使用压感</span></label>
         </div>
+        <div id="lassoSettings" hidden><p class="picker-hint">套索形状</p><div class="shape-switch"><button data-lasso-shape="rect">${icon('rectangle')}规则矩形</button><button data-lasso-shape="free">${icon('scribble')}自由套索</button></div></div>
       </section>
 
       <section class="timer-popover" id="timerPopover" hidden aria-label="考试计时器">
@@ -77,8 +88,8 @@ document.querySelector('#app').innerHTML = `
           <div class="navigator-title"><div><span>文档导航</span><strong>试卷目录</strong></div><button id="addPageButton" aria-label="新增笔记页">${icon('file-plus')}<span>加页</span></button></div>
           <div class="navigator-tabs" role="tablist" aria-label="文档导航">
             <button data-panel-tab="pages" role="tab">${icon('squares-four')}<b>页面</b></button>
-            <button data-panel-tab="bookmarks" role="tab">${icon('bookmark-simple')}<b>书签</b></button>
-            <button data-panel-tab="notes" role="tab">${icon('notepad')}<b>笔记</b></button>
+            <button data-panel-tab="traces" role="tab">${icon('wave-sine')}<b>痕迹</b></button>
+            <button data-panel-tab="excerpts" role="tab">${icon('quotes')}<b>书摘</b></button>
             <button data-panel-tab="outline" role="tab">${icon('list-dashes')}<b>大纲</b></button>
           </div>
           <label class="navigator-search">${icon('magnifying-glass')}<input id="documentSearchInput" type="search" placeholder="搜索本试卷" autocomplete="off"><span id="searchCount"></span></label>
@@ -90,6 +101,7 @@ document.querySelector('#app').innerHTML = `
         </div>
         <div class="lookup-result" id="lookupResult" hidden></div>
       </aside>
+      </section>
     </main>
     <div class="toast" id="toast"></div>
   </div>`;
@@ -97,23 +109,64 @@ document.querySelector('#app').innerHTML = `
 let mode = 'ink';
 let inkLayers = [];
 let activeInkIndex = 0;
-const toolStyles = {
-  ink: { color: '#173c36', width: 2.4, opacity: 1 },
-  highlight: { color: '#e2ef78', width: 16, opacity: .32 }
-};
-let currentDoc = { type: 'sample', pages: 1, title: '阅读练习 · Ways of Seeing' };
+const WORKSPACE_KEY = 'paperlingo:workspace:v2';
+const TOOLS_KEY = 'paperlingo:tools:v2';
+const COMMON_TOOLS_KEY = 'paperlingo:common-tools:v1';
+let workspaceState = loadWorkspaceState();
+let toolInstances = loadToolInstances();
+let commonTools = loadCommonTools();
+let activeToolId = toolInstances.find(item => item.type === 'pen')?.id || toolInstances[0].id;
+let currentDocumentId = 'sample';
+let currentDoc = { id: 'sample', type: 'sample', pages: 1, title: '阅读练习 · Ways of Seeing' };
 let lookupRequestId = 0;
 let pageBookmarks = new Set();
 let pageNotes = {};
 let documentLayers = [{ id: 'layer-1', name: '图层 1', visible: true }];
 let activeLayerId = 'layer-1';
-let mistakes = [];
 let pageObserver = null;
 let timerSeconds = 45 * 60;
 let timerPresetSeconds = timerSeconds;
 let timerInterval = null;
 const stack = document.querySelector('#paperStack');
 const panel = document.querySelector('#lookupPanel');
+
+function loadWorkspaceState() {
+  try { return normalizeWorkspaceState(JSON.parse(localStorage.getItem(WORKSPACE_KEY) || 'null')); }
+  catch { return defaultWorkspaceState(); }
+}
+
+function saveWorkspaceState() {
+  try { localStorage.setItem(WORKSPACE_KEY, JSON.stringify(workspaceState)); }
+  catch { toast('当前浏览器无法保存资料库'); }
+}
+
+function loadToolInstances() {
+  try { return normalizeToolInstances(JSON.parse(localStorage.getItem(TOOLS_KEY) || 'null')); }
+  catch { return defaultToolInstances(); }
+}
+
+function saveToolInstances() {
+  try { localStorage.setItem(TOOLS_KEY, JSON.stringify(toolInstances)); }
+  catch { toast('当前浏览器无法保存工具设置'); }
+}
+
+function loadCommonTools() {
+  try { return { layers: true, timer: true, clear: true, ...JSON.parse(localStorage.getItem(COMMON_TOOLS_KEY) || '{}') }; }
+  catch { return { layers: true, timer: true, clear: true }; }
+}
+
+function saveCommonTools() {
+  localStorage.setItem(COMMON_TOOLS_KEY, JSON.stringify(commonTools));
+  applyCommonToolVisibility();
+}
+
+function applyCommonToolVisibility() {
+  document.querySelector('#layersButton').hidden = !commonTools.layers;
+  document.querySelector('#timerButton').hidden = !commonTools.timer;
+  document.querySelector('#clearButton').hidden = !commonTools.clear;
+}
+
+function activeTool() { return toolInstances.find(item => item.id === activeToolId) || toolInstances[0]; }
 
 function toast(message) {
   const element = document.querySelector('#toast');
@@ -123,19 +176,87 @@ function toast(message) {
   toast.timer = setTimeout(() => element.classList.remove('show'), 2200);
 }
 
+function showAppView(view) {
+  const isDocument = view === 'document';
+  document.querySelector('#libraryView').hidden = view !== 'library';
+  document.querySelector('#mistakeLibraryView').hidden = view !== 'mistake-library';
+  document.querySelector('#documentWorkspace').hidden = !isDocument;
+  document.querySelector('#documentTitleBlock').hidden = !isDocument;
+  const activePrimaryView = isDocument ? 'library' : view;
+  document.querySelectorAll('[data-app-view]').forEach(button => button.classList.toggle('active', button.dataset.appView === activePrimaryView));
+  document.body.dataset.appView = view;
+  if (view === 'library') renderResourceLibrary();
+  if (view === 'mistake-library') renderMistakeLibrary();
+}
+
+function renderResourceLibrary(query = '') {
+  const target = document.querySelector('#resourceGrid');
+  const normalized = query.trim().toLocaleLowerCase();
+  const documents = workspaceState.documents.filter(doc => !normalized || `${doc.title} ${(doc.tags || []).join(' ')}`.toLocaleLowerCase().includes(normalized));
+  target.innerHTML = documents.length ? documents.map(doc => `<button class="resource-card" data-resource-id="${escapeHtml(doc.id)}"><span class="resource-cover">${icon(doc.type === 'sample' ? 'book-open-text' : doc.type === 'blank' ? 'notepad' : 'file-text')}<small>${escapeHtml((doc.type || 'FILE').toUpperCase())}</small></span><span class="resource-info"><strong>${escapeHtml(doc.title)}</strong><small>${(doc.tags || []).map(tag => `#${escapeHtml(tag)}`).join(' ') || '本机资料'}</small></span>${icon('arrow-right')}</button>`).join('') : `<div class="home-empty">${icon('folder-dashed')}<strong>没有找到资料</strong><p>换一个关键词，或上传新的文件。</p></div>`;
+  target.querySelectorAll('[data-resource-id]').forEach(button => button.addEventListener('click', () => openResource(button.dataset.resourceId)));
+}
+
+function renderMistakeLibrary() {
+  const target = document.querySelector('#mistakeBooksGrid');
+  target.innerHTML = workspaceState.mistakeBooks.map(book => {
+    const entries = workspaceState.mistakeEntries.filter(item => item.bookId === book.id);
+    return `<section class="mistake-book-card"><header><span style="--book-color:${escapeHtml(book.color || '#d8ef8f')}">${icon('notebook')}</span><div><strong>${escapeHtml(book.name)}</strong><small>${entries.length} 道错题 · 跨文件收录</small></div></header><div class="mistake-entry-grid">${entries.length ? entries.slice(0, 6).map(entry => `<button data-source-document="${escapeHtml(entry.documentId)}" data-source-page="${entry.pageIndex}"><img src="${entry.image}" alt="${escapeHtml(entry.documentTitle)}第 ${entry.pageIndex + 1} 页"><span>${escapeHtml(entry.documentTitle)} · 第 ${entry.pageIndex + 1} 页</span></button>`).join('') : `<p>还没有内容。可以在资料中用套索添加。</p>`}</div></section>`;
+  }).join('');
+  target.querySelectorAll('[data-source-document]').forEach(button => button.addEventListener('click', () => {
+    if (button.dataset.sourceDocument !== 'sample' && button.dataset.sourceDocument !== currentDocumentId) return toast('该本地文件需要重新打开后才能跳转');
+    openResource(button.dataset.sourceDocument, Number(button.dataset.sourcePage));
+  }));
+}
+
+function registerDocument(doc) {
+  const existing = workspaceState.documents.find(item => item.id === doc.id);
+  const record = { id: doc.id, title: doc.title, type: doc.type, tags: doc.tags || [], createdAt: existing?.createdAt || Date.now(), updatedAt: Date.now(), lastOpenedAt: Date.now() };
+  workspaceState = { ...workspaceState, documents: existing ? workspaceState.documents.map(item => item.id === doc.id ? { ...item, ...record } : item) : [record, ...workspaceState.documents] };
+  saveWorkspaceState();
+}
+
+function openResource(id, pageIndex = 0) {
+  const doc = workspaceState.documents.find(item => item.id === id);
+  if (!doc) return;
+  if (id === 'sample') {
+    currentDocumentId = 'sample';
+    const rendered = renderSample(stack);
+    updateMeta({ ...rendered, id: 'sample' });
+    showAppView('document');
+    if (pageIndex) requestAnimationFrame(() => goToPage(pageIndex));
+    return;
+  }
+  if (id === currentDocumentId && stack.children.length) {
+    showAppView('document');
+    requestAnimationFrame(() => goToPage(pageIndex));
+    return;
+  }
+  toast('此本地资料需要重新上传后打开');
+}
+
+function createBlankResource() {
+  const id = `blank-${Date.now()}`;
+  const title = `空白笔记 ${new Date().toLocaleDateString('zh-CN')}`;
+  stack.replaceChildren(createBlankPage(`${id}-1`));
+  currentDocumentId = id;
+  const doc = { id, type: 'blank', pages: 1, title, tags: ['笔记'] };
+  registerDocument(doc);
+  updateMeta(doc);
+  showAppView('document');
+}
+
 function applyMode(nextMode) {
   mode = nextMode;
   document.body.dataset.mode = mode;
-  document.querySelectorAll('button[data-mode]').forEach(button => {
-    const active = button.dataset.mode === mode;
+  document.querySelectorAll('button[data-tool-id]').forEach(button => {
+    const active = button.dataset.toolId === activeToolId;
     button.classList.toggle('active', active);
     button.setAttribute('aria-pressed', String(active));
   });
   stack.querySelectorAll('.ink-layer').forEach(canvas => canvas.style.pointerEvents = ['ink', 'highlight', 'eraser'].includes(mode) ? 'auto' : 'none');
   stack.querySelectorAll('.lasso-layer').forEach(layer => layer.style.pointerEvents = mode === 'lasso' ? 'auto' : 'none');
   stack.querySelectorAll('.selectable-content').forEach(layer => layer.style.pointerEvents = mode === 'lookup' ? 'auto' : 'none');
-  document.querySelector('#settingsButton').classList.toggle('available', ['ink', 'highlight'].includes(mode));
-  if (!['ink', 'highlight'].includes(mode)) closeToolSettings();
 }
 
 function saveLayers() {
@@ -148,46 +269,50 @@ function loadLayers() {
   catch { return normalizeLayers([]); }
 }
 
-function loadMistakes() {
-  try {
-    const value = JSON.parse(localStorage.getItem(mistakeStorageKey(currentDoc.title)) || '[]');
-    return Array.isArray(value) ? value.filter(item => item?.image).slice(0, 24) : [];
-  } catch { return []; }
+async function captureSelectionImage(page, rect) {
+  const pageRect = page.getBoundingClientRect();
+  const source = await html2canvas(page, {
+    backgroundColor: '#fff', scale: 1, logging: false,
+    ignoreElements: element => element.classList?.contains('lasso-layer')
+  });
+  const scaleX = source.width / pageRect.width;
+  const scaleY = source.height / pageRect.height;
+  const sx = Math.max(0, (rect.left - pageRect.left) * scaleX);
+  const sy = Math.max(0, (rect.top - pageRect.top) * scaleY);
+  const sw = Math.min(source.width - sx, rect.width * scaleX);
+  const sh = Math.min(source.height - sy, rect.height * scaleY);
+  const output = document.createElement('canvas');
+  const ratio = Math.min(1, 640 / sw);
+  output.width = Math.max(1, Math.round(sw * ratio));
+  output.height = Math.max(1, Math.round(sh * ratio));
+  output.getContext('2d').drawImage(source, sx, sy, sw, sh, 0, 0, output.width, output.height);
+  return output.toDataURL('image/jpeg', .8);
 }
 
-function saveMistakes() {
-  try { localStorage.setItem(mistakeStorageKey(currentDoc.title), JSON.stringify(mistakes.slice(0, 24))); return true; }
-  catch { toast('错题截图较多，当前浏览器本地空间不足'); return false; }
-}
-
-async function captureMistake(page, pageIndex, rect) {
-  toast('正在生成错题截图…');
+async function saveLassoCapture(page, pageIndex, rect, destination, bookId = '') {
+  toast('正在生成选区截图…');
   try {
-    const pageRect = page.getBoundingClientRect();
-    const source = await html2canvas(page, {
-      backgroundColor: '#fff', scale: 1, logging: false,
-      ignoreElements: element => element.classList?.contains('lasso-layer')
-    });
-    const scaleX = source.width / pageRect.width;
-    const scaleY = source.height / pageRect.height;
-    const sx = Math.max(0, (rect.left - pageRect.left) * scaleX);
-    const sy = Math.max(0, (rect.top - pageRect.top) * scaleY);
-    const sw = Math.min(source.width - sx, rect.width * scaleX);
-    const sh = Math.min(source.height - sy, rect.height * scaleY);
-    const maxWidth = 520;
-    const output = document.createElement('canvas');
-    const ratio = Math.min(1, maxWidth / sw);
-    output.width = Math.max(1, Math.round(sw * ratio));
-    output.height = Math.max(1, Math.round(sh * ratio));
-    output.getContext('2d').drawImage(source, sx, sy, sw, sh, 0, 0, output.width, output.height);
-    mistakes.unshift({ id: `mistake-${Date.now()}`, pageIndex, createdAt: Date.now(), image: output.toDataURL('image/jpeg', .76) });
-    if (!saveMistakes()) mistakes.shift();
-    else {
-      toast('已加入错题本');
-      if (panel.dataset.view === 'mistakes') renderMistakes();
+    const image = await captureSelectionImage(page, rect);
+    if (destination === 'excerpt') {
+      workspaceState = addExcerpt(workspaceState, currentDocumentId, { pageIndex, image }).state;
+      saveWorkspaceState();
+      toast('已保存为书摘，可在“书摘”中添加笔记');
+      if (panel.dataset.view === 'excerpts') renderExcerpts();
+      return;
     }
+    const destinationId = bookId || workspaceState.mistakeBooks[0]?.id;
+    workspaceState = addMistakeEntry(workspaceState, {
+      bookId: destinationId,
+      documentId: currentDocumentId,
+      documentTitle: currentDoc.title,
+      pageIndex,
+      image
+    });
+    saveWorkspaceState();
+    const book = workspaceState.mistakeBooks.find(item => item.id === destinationId);
+    toast(`已收录到“${book?.name || '错题本'}”`);
   } catch (error) {
-    console.warn('Mistake capture failed', error);
+    console.warn('Selection capture failed', error);
     toast('截图失败，请缩小选区后重试');
   }
 }
@@ -196,45 +321,152 @@ function mountLassoLayer(page, pageIndex) {
   page.querySelector('.lasso-layer')?.remove();
   const layer = document.createElement('div');
   layer.className = 'lasso-layer';
-  layer.setAttribute('aria-label', '套索截图区域');
+  layer.setAttribute('aria-label', '套索选择区域');
   page.append(layer);
   let start = null;
   let selection = null;
+  let points = [];
+  let selectedStrokeIds = [];
+  let moveStart = null;
+  let moveDelta = { x: 0, y: 0 };
+
+  const clearSelection = () => {
+    layer.replaceChildren();
+    selection = null;
+    selectedStrokeIds = [];
+    points = [];
+    moveStart = null;
+    moveDelta = { x: 0, y: 0 };
+  };
+
+  const selectionRect = () => selection?.getBoundingClientRect();
+
+  const renderActions = rect => {
+    const bounds = layer.getBoundingClientRect();
+    const actions = document.createElement('div');
+    actions.className = 'lasso-actions';
+    actions.style.left = `${Math.max(8, Math.min(layer.clientWidth - 330, rect.left - bounds.left))}px`;
+    actions.style.top = `${Math.max(8, rect.top - bounds.top - 54)}px`;
+    actions.innerHTML = `<div class="lasso-primary-actions"><button data-lasso-action="copy" title="复制字迹">${icon('copy')}<span>复制</span></button><button data-lasso-action="move" title="移动字迹">${icon('arrows-out-cardinal')}<span>移动</span></button><button data-lasso-action="scale" title="放大字迹">${icon('arrows-out')}<span>放大</span></button><button data-lasso-action="delete" title="删除字迹">${icon('trash')}<span>删除</span></button></div><div class="lasso-capture-actions"><button data-lasso-action="excerpt">${icon('quotes')}书摘</button><label><select aria-label="选择错题本">${workspaceState.mistakeBooks.map(book => `<option value="${escapeHtml(book.id)}">${escapeHtml(book.name)}</option>`).join('')}</select><button data-lasso-action="mistake">${icon('notebook')}收录</button></label></div>`;
+    layer.append(actions);
+    actions.querySelectorAll('[data-lasso-action]').forEach(button => bindPress(button, async () => {
+      const action = button.dataset.lassoAction;
+      const ink = inkLayers[pageIndex];
+      if (action === 'copy') {
+        selectedStrokeIds = ink.duplicateSelection(selectedStrokeIds);
+        toast(selectedStrokeIds.length ? '已复制字迹' : '选区中没有可复制的字迹');
+      } else if (action === 'move') {
+        if (!selectedStrokeIds.length) return toast('选区中没有可移动的字迹');
+        selection.classList.add('move-armed');
+        toast('拖动选区即可移动字迹');
+      } else if (action === 'scale') {
+        const current = selectionRect();
+        ink.transformSelection(selectedStrokeIds, { scale: 1.12, origin: { x: (current.left - bounds.left + current.width / 2) / bounds.width, y: (current.top - bounds.top + current.height / 2) / bounds.height } });
+        toast(selectedStrokeIds.length ? '已放大字迹' : '选区中没有可缩放的字迹');
+      } else if (action === 'delete') {
+        const deleted = ink.deleteSelection(selectedStrokeIds);
+        clearSelection();
+        toast(deleted ? '已删除选中字迹' : '选区中没有字迹，未删除原文');
+      } else if (action === 'excerpt') {
+        await saveLassoCapture(page, pageIndex, selectionRect(), 'excerpt');
+        clearSelection();
+      } else if (action === 'mistake') {
+        await saveLassoCapture(page, pageIndex, selectionRect(), 'mistake', actions.querySelector('select').value);
+        clearSelection();
+      }
+    }));
+  };
+
+  const updateSelection = (x, y) => {
+    const left = Math.min(start.x, x);
+    const top = Math.min(start.y, y);
+    const width = Math.abs(x - start.x);
+    const height = Math.abs(y - start.y);
+    Object.assign(selection.style, { left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px` });
+    if (activeTool()?.params?.shape === 'free') {
+      points.push({ x, y });
+      const relative = points.map(point => `${((point.x - left) / Math.max(width, 1)) * 100}% ${((point.y - top) / Math.max(height, 1)) * 100}%`);
+      selection.style.clipPath = `polygon(${relative.join(',')})`;
+    }
+  };
+
   layer.addEventListener('pointerdown', event => {
+    if (event.target.closest('.lasso-actions')) return;
+    if (selection?.classList.contains('move-armed') && event.target === selection) {
+      event.preventDefault();
+      moveStart = { x: event.clientX, y: event.clientY };
+      layer.setPointerCapture?.(event.pointerId);
+      return;
+    }
     event.preventDefault();
     layer.setPointerCapture?.(event.pointerId);
     const bounds = layer.getBoundingClientRect();
     start = { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
     selection = document.createElement('span');
-    selection.className = 'lasso-selection';
+    selection.className = `lasso-selection ${activeTool()?.params?.shape === 'free' ? 'free' : 'rect'}`;
+    points = [start];
     layer.replaceChildren(selection);
   });
   layer.addEventListener('pointermove', event => {
+    if (moveStart && selection) {
+      moveDelta = { x: event.clientX - moveStart.x, y: event.clientY - moveStart.y };
+      selection.style.transform = `translate(${moveDelta.x}px, ${moveDelta.y}px)`;
+      return;
+    }
     if (!start || !selection) return;
     const bounds = layer.getBoundingClientRect();
     const x = Math.max(0, Math.min(bounds.width, event.clientX - bounds.left));
     const y = Math.max(0, Math.min(bounds.height, event.clientY - bounds.top));
-    Object.assign(selection.style, { left: `${Math.min(start.x, x)}px`, top: `${Math.min(start.y, y)}px`, width: `${Math.abs(x - start.x)}px`, height: `${Math.abs(y - start.y)}px` });
+    updateSelection(x, y);
   });
-  layer.addEventListener('pointerup', event => {
+  layer.addEventListener('pointerup', () => {
+    if (moveStart && selection) {
+      const bounds = layer.getBoundingClientRect();
+      inkLayers[pageIndex].transformSelection(selectedStrokeIds, { dx: moveDelta.x / bounds.width, dy: moveDelta.y / bounds.height });
+      const left = Number.parseFloat(selection.style.left) + moveDelta.x;
+      const top = Number.parseFloat(selection.style.top) + moveDelta.y;
+      Object.assign(selection.style, { left: `${left}px`, top: `${top}px`, transform: '', clipPath: '' });
+      selection.classList.remove('move-armed');
+      moveStart = null;
+      moveDelta = { x: 0, y: 0 };
+      layer.querySelector('.lasso-actions')?.remove();
+      renderActions(selectionRect());
+      return;
+    }
     if (!start || !selection) return;
     const rect = selection.getBoundingClientRect();
     start = null;
-    if (rect.width >= 36 && rect.height >= 28) captureMistake(page, pageIndex, rect);
-    else toast('请框选一个更大的题目区域');
-    selection.remove();
-    selection = null;
+    if (rect.width < 36 || rect.height < 28) {
+      clearSelection();
+      return toast('请框选一个更大的区域');
+    }
+    const bounds = layer.getBoundingClientRect();
+    selectedStrokeIds = inkLayers[pageIndex].selectInRect({ left: (rect.left - bounds.left) / bounds.width, right: (rect.right - bounds.left) / bounds.width, top: (rect.top - bounds.top) / bounds.height, bottom: (rect.bottom - bounds.top) / bounds.height }, activeLayerId);
+    renderActions(rect);
   });
+  layer.addEventListener('pointercancel', clearSelection);
 }
 
 function closeToolSettings() {
   document.querySelector('#toolPopover').hidden = true;
-  document.querySelector('#settingsButton').setAttribute('aria-expanded', 'false');
 }
 
-function openToolSettings() {
-  syncSettings(true);
-  document.querySelector('#settingsButton').setAttribute('aria-expanded', 'true');
+function openToolSettings(instance = activeTool()) {
+  if (!toolDefinition(instance.type)?.configurable) return toast(`${instance.name}没有可调整参数`);
+  syncSettings(instance, true);
+}
+
+function renderToolInstances() {
+  const group = document.querySelector('#toolInstanceGroup');
+  group.innerHTML = toolInstances.filter(item => item.visible).map(item => `<button class="tool ${item.id === activeToolId ? 'active' : ''}" data-tool-id="${escapeHtml(item.id)}" aria-label="${escapeHtml(item.name)}" aria-pressed="${item.id === activeToolId}">${icon(item.icon)}<span>${escapeHtml(item.name)}</span></button>`).join('');
+  group.querySelectorAll('[data-tool-id]').forEach(button => bindPress(button, () => {
+    const instance = toolInstances.find(item => item.id === button.dataset.toolId);
+    if (!instance) return;
+    if (activeToolId === instance.id) return openToolSettings(instance);
+    activeToolId = instance.id;
+    applyMode(toolMode(instance));
+    toast(`已切换到${instance.name}`);
+  }));
 }
 
 function mountInkLayers() {
@@ -268,7 +500,7 @@ function mountInkLayers() {
     canvas.addEventListener('touchstart', markActive, { passive: true });
     canvas.addEventListener('mousedown', markActive);
     return createInkLayer(canvas, `paperlingo:${currentDoc.title}:${index}`, () => ({
-      mode, ...(toolStyles[mode] || {}), layerId: activeLayerId,
+      mode, ...(activeTool()?.params || {}), toolId: activeToolId, layerId: activeLayerId,
       hiddenLayers: documentLayers.filter(layer => !layer.visible).map(layer => layer.id)
     }));
   });
@@ -287,19 +519,19 @@ function mountInkLayers() {
 }
 
 function updateMeta(doc) {
-  currentDoc = doc;
+  currentDoc = { ...doc, id: doc.id || currentDocumentId };
+  currentDocumentId = currentDoc.id;
   document.querySelector('#docTitle').textContent = doc.title;
   pageBookmarks = loadBookmarks();
   pageNotes = loadNotes();
   documentLayers = loadLayers();
   activeLayerId = documentLayers[0].id;
-  mistakes = loadMistakes();
   mountInkLayers();
   if (isNavigatorView(panel.dataset.view)) renderNavigatorView(panel.dataset.view);
 }
 
 function isNavigatorView(view) {
-  return ['pages', 'bookmarks', 'notes', 'outline'].includes(view);
+  return ['pages', 'traces', 'excerpts', 'outline'].includes(view);
 }
 
 function loadBookmarks() {
@@ -336,12 +568,12 @@ function showPanelView(view) {
   const searchInput = document.querySelector('#documentSearchInput');
   if (searchInput && previousView !== view && !isNavigatorView(view)) searchInput.value = '';
   document.querySelector('#panelHeading').hidden = !isNavigatorView(view);
-  document.querySelector('#specialPanelHeading').hidden = !['layers', 'mistakes'].includes(view);
+  document.querySelector('#specialPanelHeading').hidden = !['layers', 'toolbar'].includes(view);
   document.querySelector('#lookupEmpty').hidden = true;
   document.querySelector('#lookupResult').hidden = false;
   if (isNavigatorView(view)) renderNavigatorView(view);
   else if (view === 'layers') renderLayers();
-  else if (view === 'mistakes') renderMistakes();
+  else if (view === 'toolbar') renderToolbarManager();
   panel.classList.add('open');
 }
 
@@ -439,23 +671,21 @@ function renderPageThumbnails(indexes = null) {
   bindPageCards(target);
 }
 
-function collectOutlineItems() {
-  const pages = [...stack.querySelectorAll('.paper-page')];
-  const seen = new Set();
-  return pages.flatMap((page, pageIndex) => [...page.querySelectorAll('h1,h2,h3,h4,h5,h6,[class*="heading"]')]
-    .map(element => ({ label: element.textContent.replace(/\s+/g, ' ').trim(), level: headingLevel(element), pageIndex }))
-    .filter(item => item.label.length >= 2 && item.label.length <= 100 && !seen.has(`${item.pageIndex}:${item.label}`) && seen.add(`${item.pageIndex}:${item.label}`)));
-}
-
 function renderOutline() {
   const target = document.querySelector('#lookupResult');
-  const items = collectOutlineItems();
-  if (!items.length) {
-    target.innerHTML = `<div class="navigator-empty">${icon('list-dashes')}<strong>没有识别到大纲</strong><p>带有标题样式的 Word 文档会在这里自动生成目录。</p></div>`;
-    return;
-  }
-  target.innerHTML = `<ol class="outline-list">${items.map(item => `<li style="--level:${Math.min(item.level, 4)}"><button data-outline-page="${item.pageIndex}"><span>${escapeHtml(item.label)}</span><small>${item.pageIndex + 1}</small></button></li>`).join('')}</ol>`;
+  const items = workspaceState.outlinesByDocument[currentDocumentId] || [];
+  const depthOf = item => item.parentId && items.some(parent => parent.id === item.parentId) ? 2 : 1;
+  target.innerHTML = `<form class="outline-create" id="outlineCreateForm"><input id="outlineLabel" maxlength="80" placeholder="输入大纲名称" required><select id="outlineParent"><option value="">一级大纲</option>${items.map(item => `<option value="${escapeHtml(item.id)}">作为“${escapeHtml(item.label)}”的子级</option>`).join('')}</select><button>关联第 ${activeInkIndex + 1} 页</button></form>${items.length ? `<ol class="outline-list">${items.map(item => `<li style="--level:${depthOf(item)}"><button data-outline-page="${item.pageIndex}"><span>${escapeHtml(item.label)}</span><small>${item.pageIndex + 1}</small></button><button class="outline-remove" data-outline-remove="${escapeHtml(item.id)}" aria-label="删除${escapeHtml(item.label)}">${icon('x')}</button></li>`).join('')}</ol>` : `<div class="navigator-empty compact">${icon('list-dashes')}<strong>大纲由你创建</strong><p>输入标题并关联当前页，也可以建立子级。</p></div>`}`;
+  target.querySelector('#outlineCreateForm').addEventListener('submit', event => {
+    event.preventDefault();
+    const result = addOutlineNode(workspaceState, currentDocumentId, { label: target.querySelector('#outlineLabel').value, pageIndex: activeInkIndex, parentId: target.querySelector('#outlineParent').value || null });
+    workspaceState = result.state; saveWorkspaceState(); renderOutline(); toast('已添加到大纲');
+  });
   target.querySelectorAll('[data-outline-page]').forEach(button => button.addEventListener('click', () => goToPage(Number(button.dataset.outlinePage))));
+  target.querySelectorAll('[data-outline-remove]').forEach(button => button.addEventListener('click', () => {
+    workspaceState = { ...workspaceState, outlinesByDocument: { ...workspaceState.outlinesByDocument, [currentDocumentId]: items.filter(item => item.id !== button.dataset.outlineRemove && item.parentId !== button.dataset.outlineRemove) } };
+    saveWorkspaceState(); renderOutline();
+  }));
 }
 
 function pageSearchText(page) {
@@ -483,27 +713,57 @@ function renderSearchResults(query) {
   target.querySelectorAll('[data-search-page]').forEach(button => button.addEventListener('click', () => goToPage(Number(button.dataset.searchPage))));
 }
 
-function renderNotes() {
+function renderTraces() {
   const target = document.querySelector('#lookupResult');
-  const saved = Object.entries(pageNotes).filter(([, note]) => note.trim()).sort((a, b) => Number(a[0]) - Number(b[0]));
-  target.innerHTML = `<div class="page-note-editor">
-    <div><span>当前页</span><strong>第 ${activeInkIndex + 1} 页</strong></div>
-    <textarea id="pageNoteInput" maxlength="8000" placeholder="记录易错点、解题思路或待复习内容…">${escapeHtml(pageNotes[activeInkIndex] || '')}</textarea>
-    <small>自动保存在本机</small>
-  </div>
-  <div class="saved-notes"><header><strong>已有笔记</strong><span>${saved.length}</span></header>
-    ${saved.length ? saved.map(([index, note]) => `<button data-note-page="${index}"><b>第 ${Number(index) + 1} 页</b><span>${escapeHtml(note.slice(0, 70))}</span></button>`).join('') : `<p>还没有笔记。先在上方记录当前页的易错点。</p>`}
-  </div>`;
-  const input = target.querySelector('#pageNoteInput');
-  input?.addEventListener('input', () => {
-    const value = input.value;
-    if (value.trim()) pageNotes[activeInkIndex] = value;
-    else delete pageNotes[activeInkIndex];
-    saveNotes();
+  const excerpts = workspaceState.excerptsByDocument[currentDocumentId] || [];
+  const indexes = tracePageIndexes({ inkPages: inkLayers.map((layer, index) => layer.hasInk() ? index : -1), excerpts });
+  if (!indexes.length) {
+    target.innerHTML = `<div class="navigator-empty">${icon('wave-sine')}<strong>还没有留下痕迹</strong><p>有手写、荧光或书摘的页面会自动出现在这里。</p></div>`;
+    return;
+  }
+  renderPageThumbnails(indexes);
+}
+
+function renderExcerpts() {
+  const target = document.querySelector('#lookupResult');
+  const excerpts = workspaceState.excerptsByDocument[currentDocumentId] || [];
+  if (!excerpts.length) {
+    target.innerHTML = `<div class="navigator-empty">${icon('quotes')}<strong>还没有书摘</strong><p>使用套索圈选内容，然后选择“截图做书摘”。</p></div>`;
+    return;
+  }
+  target.innerHTML = `<div class="excerpt-list">${excerpts.map(item => `<article><img src="${item.image}" alt="第 ${item.pageIndex + 1} 页书摘"><button data-excerpt-page="${item.pageIndex}">第 ${item.pageIndex + 1} 页 ${icon('arrow-right')}</button><textarea data-excerpt-note="${escapeHtml(item.id)}" placeholder="为这条书摘添加笔记…">${escapeHtml(item.note)}</textarea></article>`).join('')}</div>`;
+  target.querySelectorAll('[data-excerpt-page]').forEach(button => button.addEventListener('click', () => goToPage(Number(button.dataset.excerptPage))));
+  target.querySelectorAll('[data-excerpt-note]').forEach(input => input.addEventListener('change', () => {
+    const next = excerpts.map(item => item.id === input.dataset.excerptNote ? { ...item, note: input.value.slice(0, 4000) } : item);
+    workspaceState = { ...workspaceState, excerptsByDocument: { ...workspaceState.excerptsByDocument, [currentDocumentId]: next } };
+    saveWorkspaceState();
+  }));
+}
+
+function renderToolbarManager() {
+  const heading = document.querySelector('#specialPanelHeading');
+  heading.innerHTML = `<span>工作台设置</span><strong>常用工具</strong><p>调整工具顺序、显示内容，笔的参数请直接再次点击对应笔。</p>`;
+  const target = document.querySelector('#lookupResult');
+  const commonLabels = { layers: ['stack', '图层'], timer: ['timer', '计时'], clear: ['trash', '清空'] };
+  target.innerHTML = `<div class="toolbar-manager"><h3>笔与操作</h3>${toolInstances.map((tool, index) => `<article data-manager-tool="${escapeHtml(tool.id)}"><span>${icon(tool.icon)}<b>${escapeHtml(tool.name)}</b></span><div><button data-tool-move="up" ${index === 0 ? 'disabled' : ''} aria-label="上移">${icon('arrow-up')}</button><button data-tool-move="down" ${index === toolInstances.length - 1 ? 'disabled' : ''} aria-label="下移">${icon('arrow-down')}</button><button data-tool-visible aria-label="${tool.visible ? '隐藏' : '显示'}">${icon(tool.visible ? 'eye' : 'eye-slash')}</button></div></article>`).join('')}<h3>辅助功能</h3>${Object.entries(commonLabels).map(([id, [toolIcon, label]]) => `<label class="common-tool-toggle">${icon(toolIcon)}<span>${label}</span><input type="checkbox" data-common-tool="${id}" ${commonTools[id] ? 'checked' : ''}></label>`).join('')}</div>`;
+  target.querySelectorAll('[data-manager-tool]').forEach(row => {
+    const id = row.dataset.managerTool;
+    row.querySelector('[data-tool-visible]').addEventListener('click', () => {
+      const tool = toolInstances.find(item => item.id === id);
+      tool.visible = !tool.visible;
+      if (!tool.visible && activeToolId === id) activeToolId = toolInstances.find(item => item.visible && item.id !== id)?.id || toolInstances[0].id;
+      saveToolInstances(); renderToolInstances(); applyMode(toolMode(activeTool())); renderToolbarManager();
+    });
+    row.querySelectorAll('[data-tool-move]').forEach(button => button.addEventListener('click', () => {
+      const index = toolInstances.findIndex(item => item.id === id);
+      const next = button.dataset.toolMove === 'up' ? index - 1 : index + 1;
+      if (next < 0 || next >= toolInstances.length) return;
+      [toolInstances[index], toolInstances[next]] = [toolInstances[next], toolInstances[index]];
+      saveToolInstances(); renderToolInstances(); renderToolbarManager();
+    }));
   });
-  target.querySelectorAll('[data-note-page]').forEach(button => button.addEventListener('click', () => {
-    goToPage(Number(button.dataset.notePage));
-    renderNotes();
+  target.querySelectorAll('[data-common-tool]').forEach(input => input.addEventListener('change', () => {
+    commonTools[input.dataset.commonTool] = input.checked; saveCommonTools();
   }));
 }
 
@@ -564,19 +824,6 @@ function renderLayers() {
   });
 }
 
-function renderMistakes() {
-  const heading = document.querySelector('#specialPanelHeading');
-  heading.innerHTML = `<span>复习整理</span><strong>错题本</strong><p>选择“套索”，框住页面中的题目区域即可收进这里。</p>`;
-  const target = document.querySelector('#lookupResult');
-  if (!mistakes.length) {
-    target.innerHTML = `<div class="navigator-empty">${icon('selection')}<strong>还没有错题截图</strong><p>关闭面板，选择套索工具并框选一道题。</p><button id="startLassoButton">开始框选</button></div>`;
-    target.querySelector('#startLassoButton').addEventListener('click', () => { panel.classList.remove('open'); applyMode('lasso'); });
-    return;
-  }
-  target.innerHTML = `<div class="mistake-list">${mistakes.map(item => `<article><img src="${item.image}" alt="第 ${Number(item.pageIndex) + 1} 页的错题截图"><div><strong>第 ${Number(item.pageIndex) + 1} 页</strong><small>${new Date(item.createdAt).toLocaleDateString('zh-CN')}</small><button data-mistake-page="${item.pageIndex}">回到原页</button></div></article>`).join('')}</div>`;
-  target.querySelectorAll('[data-mistake-page]').forEach(button => button.addEventListener('click', () => goToPage(Number(button.dataset.mistakePage))));
-}
-
 function addBlankPage() {
   const page = createBlankPage(`notes-${Date.now()}`);
   stack.append(page);
@@ -608,8 +855,8 @@ function renderNavigatorView(view) {
   });
   if (searchInput?.value.trim()) return renderSearchResults(searchInput.value);
   if (view === 'pages') renderPageThumbnails();
-  else if (view === 'bookmarks') renderPageThumbnails([...pageBookmarks]);
-  else if (view === 'notes') renderNotes();
+  else if (view === 'traces') renderTraces();
+  else if (view === 'excerpts') renderExcerpts();
   else renderOutline();
 }
 
@@ -679,8 +926,7 @@ function showSentence(text) {
 }
 
 renderSample(stack);
-updateMeta(currentDoc);
-applyMode('ink');
+updateMeta({ ...currentDoc, id: 'sample' });
 
 function bindPress(element, handler) {
   let lastTouch = 0;
@@ -694,13 +940,26 @@ function bindPress(element, handler) {
   });
 }
 
-const modeLabels = { ink: '钢笔', highlight: '荧光笔', eraser: '橡皮', lasso: '套索', lookup: '查词', pan: '浏览' };
-document.querySelectorAll('button[data-mode]').forEach(button => {
-  bindPress(button, () => {
-    const nextMode = button.dataset.mode;
-    closeToolSettings();
-    applyMode(nextMode);
-    toast(`已切换到${modeLabels[nextMode]}模式`);
+const modeLabels = { ink: '笔', highlight: '荧光笔', eraser: '橡皮', lasso: '套索', lookup: '查词', pan: '浏览' };
+renderToolInstances();
+applyCommonToolVisibility();
+applyMode(toolMode(activeTool()));
+showAppView('library');
+
+document.querySelectorAll('[data-app-view]').forEach(button => bindPress(button, () => {
+  panel.classList.remove('open'); closeToolSettings(); showAppView(button.dataset.appView);
+}));
+bindPress(document.querySelector('#backLibraryButton'), () => showAppView('library'));
+bindPress(document.querySelector('#newBlankDocument'), createBlankResource);
+document.querySelector('#resourceSearch').addEventListener('input', event => renderResourceLibrary(event.target.value));
+bindPress(document.querySelector('#createMistakeBookButton'), () => {
+  const target = document.querySelector('#mistakeBooksGrid');
+  target.insertAdjacentHTML('afterbegin', `<form class="new-book-form" id="newBookForm"><input maxlength="40" placeholder="错题本名称" required autofocus><button>创建</button><button type="button" data-cancel-book>取消</button></form>`);
+  const form = target.querySelector('#newBookForm');
+  form.querySelector('input').focus();
+  form.querySelector('[data-cancel-book]').addEventListener('click', () => form.remove());
+  form.addEventListener('submit', event => {
+    event.preventDefault(); const result = createMistakeBook(workspaceState, form.querySelector('input').value); workspaceState = result.state; saveWorkspaceState(); renderMistakeLibrary();
   });
 });
 bindPress(document.querySelector('#undoButton'), () => {
@@ -731,7 +990,6 @@ bindPress(document.querySelector('#pagesButton'), () => {
   else showPanelView('pages');
 });
 bindPress(document.querySelector('#layersButton'), () => showPanelView('layers'));
-bindPress(document.querySelector('#mistakesButton'), () => showPanelView('mistakes'));
 bindPress(document.querySelector('#addPageButton'), addBlankPage);
 document.querySelectorAll('[data-panel-tab]').forEach(button => bindPress(button, () => showPanelView(button.dataset.panelTab)));
 bindPress(document.querySelector('#closePanel'), () => panel.classList.remove('open'));
@@ -782,45 +1040,79 @@ document.querySelectorAll('[data-timer-minutes]').forEach(button => bindPress(bu
   renderTimer();
 }));
 
-function syncSettings(open = false) {
+let editingToolId = activeToolId;
+function syncSettings(instance = activeTool(), open = false) {
   const popover = document.querySelector('#toolPopover');
-  const currentMode = mode === 'highlight' ? 'highlight' : 'ink';
-  const style = toolStyles[currentMode];
-  document.querySelector('#settingsTitle').textContent = modeLabels[currentMode];
-  document.querySelector('#widthRange').value = style.width;
-  document.querySelector('#widthValue').value = style.width.toFixed(1);
-  document.querySelector('#opacityRange').value = Math.round(style.opacity * 100);
-  document.querySelector('#opacityValue').value = `${Math.round(style.opacity * 100)}%`;
-  document.querySelectorAll('.swatch').forEach(swatch => swatch.classList.toggle('active', swatch.dataset.color === style.color));
-  if (open) popover.hidden = false;
-}
-bindPress(document.querySelector('#settingsButton'), () => {
-  if (!['ink', 'highlight'].includes(mode)) return toast('请先选择钢笔或荧光笔');
-  const popover = document.querySelector('#toolPopover');
-  if (popover.hidden) {
-    panel.classList.remove('open');
-    openToolSettings();
+  editingToolId = instance.id;
+  document.querySelector('#toolPicker').hidden = true;
+  const penSettings = document.querySelector('#instanceSettings');
+  const lassoSettings = document.querySelector('#lassoSettings');
+  penSettings.hidden = instance.type !== 'pen';
+  lassoSettings.hidden = instance.type !== 'lasso';
+  document.querySelector('#settingsTitle').textContent = instance.name;
+  if (instance.type === 'pen') {
+    const style = instance.params;
+    document.querySelector('#widthRange').value = style.width;
+    document.querySelector('#widthValue').value = Number(style.width).toFixed(1);
+    document.querySelector('#opacityRange').value = Math.round(style.opacity * 100);
+    document.querySelector('#opacityValue').value = `${Math.round(style.opacity * 100)}%`;
+    document.querySelector('#pressureToggle').checked = Boolean(style.pressure);
+    document.querySelectorAll('.swatch').forEach(swatch => swatch.classList.toggle('active', swatch.dataset.color === style.color));
   }
-  else closeToolSettings();
-});
+  if (instance.type === 'lasso') document.querySelectorAll('[data-lasso-shape]').forEach(button => button.classList.toggle('active', button.dataset.lassoShape === (instance.params.shape || 'rect')));
+  if (open) { panel.classList.remove('open'); popover.hidden = false; }
+}
+
+function openToolPicker() {
+  const popover = document.querySelector('#toolPopover');
+  document.querySelector('#settingsTitle').textContent = '添加工具';
+  document.querySelector('#instanceSettings').hidden = true;
+  document.querySelector('#lassoSettings').hidden = true;
+  document.querySelector('#toolPicker').hidden = false;
+  const pen = toolDefinition('pen');
+  const actions = ['eraser', 'lasso', 'lookup', 'pan'].map(type => toolDefinition(type));
+  document.querySelector('#toolTypeGrid').innerHTML = `${pen.subtypes.map(item => `<button data-add-tool="pen" data-add-subtype="${item.id}">${icon(item.icon)}<span>${item.label}</span></button>`).join('')}${actions.map(item => `<button data-add-tool="${item.id}">${icon(item.icon)}<span>${item.label}</span></button>`).join('')}`;
+  document.querySelectorAll('[data-add-tool]').forEach(button => bindPress(button, () => {
+    const instance = createToolInstance(button.dataset.addTool, { subtype: button.dataset.addSubtype || undefined });
+    toolInstances.push(instance); activeToolId = instance.id; saveToolInstances(); renderToolInstances(); applyMode(toolMode(instance));
+    if (toolDefinition(instance.type)?.configurable) syncSettings(instance, true); else closeToolSettings();
+    toast(`已添加${instance.name}`);
+  }));
+  popover.hidden = false;
+}
+
+bindPress(document.querySelector('#addToolButton'), openToolPicker);
+bindPress(document.querySelector('#settingsButton'), () => showPanelView('toolbar'));
 bindPress(document.querySelector('#closeSettings'), event => {
   event.stopPropagation();
   closeToolSettings();
 });
 document.querySelector('#widthRange').addEventListener('input', event => {
-  const currentMode = mode === 'highlight' ? 'highlight' : 'ink';
-  toolStyles[currentMode].width = Number(event.target.value);
+  const instance = toolInstances.find(item => item.id === editingToolId);
+  if (!instance) return;
+  instance.params.width = Number(event.target.value); saveToolInstances();
   document.querySelector('#widthValue').value = Number(event.target.value).toFixed(1);
 });
 document.querySelector('#opacityRange').addEventListener('input', event => {
-  const currentMode = mode === 'highlight' ? 'highlight' : 'ink';
-  toolStyles[currentMode].opacity = Number(event.target.value) / 100;
+  const instance = toolInstances.find(item => item.id === editingToolId);
+  if (!instance) return;
+  instance.params.opacity = Number(event.target.value) / 100; saveToolInstances();
   document.querySelector('#opacityValue').value = `${event.target.value}%`;
 });
 document.querySelectorAll('.swatch').forEach(swatch => bindPress(swatch, () => {
-  const currentMode = mode === 'highlight' ? 'highlight' : 'ink';
-  toolStyles[currentMode].color = swatch.dataset.color;
+  const instance = toolInstances.find(item => item.id === editingToolId);
+  if (!instance) return;
+  instance.params.color = swatch.dataset.color; saveToolInstances();
   document.querySelectorAll('.swatch').forEach(item => item.classList.toggle('active', item === swatch));
+}));
+document.querySelector('#pressureToggle').addEventListener('change', event => {
+  const instance = toolInstances.find(item => item.id === editingToolId);
+  if (instance) { instance.params.pressure = event.target.checked; saveToolInstances(); }
+});
+document.querySelectorAll('[data-lasso-shape]').forEach(button => bindPress(button, () => {
+  const instance = toolInstances.find(item => item.id === editingToolId);
+  if (!instance) return;
+  instance.params.shape = button.dataset.lassoShape; saveToolInstances(); syncSettings(instance);
 }));
 
 let lastLookupActivation = 0;
@@ -851,8 +1143,7 @@ stack.addEventListener('dblclick', (event) => {
   else showLookup(selection || wordAtPoint(event.clientX, event.clientY));
 });
 
-document.querySelector('#fileInput').addEventListener('change', async (event) => {
-  const file = event.target.files?.[0];
+async function importLocalFile(file, input) {
   if (!file) return;
   const saveState = document.querySelector('#saveState');
   saveState.textContent = '正在本地处理…';
@@ -862,7 +1153,12 @@ document.querySelector('#fileInput').addEventListener('change', async (event) =>
     else if (file.name.toLowerCase().endsWith('.docx')) doc = await renderWord(file, stack);
     else if (file.type.startsWith('image/')) doc = await renderImage(file, stack);
     else throw new Error('当前本地 Demo 暂不支持旧版 .doc，请先另存为 .docx');
+    const id = `file-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    doc = { ...doc, id, tags: [] };
+    currentDocumentId = id;
+    registerDocument(doc);
     updateMeta(doc);
+    showAppView('document');
     saveState.textContent = '仅保存在本机';
     if (doc.failedPages?.length) toast(`试卷已载入，${doc.failedPages.length} 页暂时无法显示`);
     else if (doc.textLayerFallbacks?.length) toast('试卷已显示；当前浏览器暂不能点选部分文字');
@@ -872,6 +1168,8 @@ document.querySelector('#fileInput').addEventListener('change', async (event) =>
     saveState.textContent = '载入失败';
     toast(error.message || '文件载入失败');
   } finally {
-    event.target.value = '';
+    input.value = '';
   }
-});
+}
+
+document.querySelectorAll('#fileInput,[data-library-upload]').forEach(input => input.addEventListener('change', event => importLocalFile(event.target.files?.[0], input)));

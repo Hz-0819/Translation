@@ -42,8 +42,16 @@ test('ink layer supports draw, undo, redo and clear', () => {
     windowListeners.get('mousemove')({ clientX: 80, clientY: 100 });
     windowListeners.get('mouseup')();
 
+    const selected = layer.selectInRect({ left: 0, top: 0, right: .5, bottom: .5 });
+    assert.equal(selected.length, 1);
+    const copies = layer.duplicateSelection(selected);
+    assert.equal(copies.length, 1);
+    assert.equal(layer.transformSelection(copies, { dx: .1, dy: .1, scale: 1.1 }), true);
+    assert.equal(layer.deleteSelection(copies), true);
+
     assert.equal(layer.undo(), true);
-    assert.equal(layer.undo(), false);
+    assert.equal(layer.undo(), true);
+    assert.equal(layer.redo(), true);
     assert.equal(layer.redo(), true);
     assert.equal(layer.clear(), true);
     assert.equal(layer.clear(), false);

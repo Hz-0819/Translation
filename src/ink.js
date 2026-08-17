@@ -25,8 +25,9 @@ export function createInkLayer(canvas, storageKey, getTool) {
   let strokes = parseStoredStrokes(stored);
   const initialTool = getTool();
   const fallbackLayerId = typeof initialTool === 'object' ? (initialTool.layerId || 'annotation') : 'annotation';
-  strokes = strokes.map(stroke => ({ ...stroke, layerId: stroke.layerId || fallbackLayerId }));
-  let redoStrokes = [];
+  strokes = strokes.map((stroke, index) => ({ ...stroke, id: stroke.id || `stroke-legacy-${index}`, layerId: stroke.layerId || fallbackLayerId }));
+  let undoStack = [];
+  let redoStack = [];
   let active = null;
   let activeSource = '';
   let ignoreMouseUntil = 0;
@@ -71,6 +72,12 @@ export function createInkLayer(canvas, storageKey, getTool) {
   const save = () => {
     try { localStorage.setItem(storageKey, JSON.stringify(strokes)); } catch { /* Continue without persistence. */ }
   };
+  const snapshot = () => strokes.map(stroke => ({ ...stroke, points: stroke.points?.map(point => ({ ...point })) || [] }));
+  const remember = () => {
+    undoStack.push(snapshot());
+    if (undoStack.length > 80) undoStack.shift();
+    redoStack = [];
+  };
   const toolState = () => {
     const value = getTool();
     return typeof value === 'string' ? { mode: value } : value;
@@ -81,13 +88,17 @@ export function createInkLayer(canvas, storageKey, getTool) {
     const radius = Math.max(14, Math.min(rect.width, rect.height) * .025);
     const before = strokes.length;
     const activeLayerId = toolState().layerId || 'annotation';
-    strokes = strokes.filter(stroke => (stroke.layerId || 'annotation') !== activeLayerId || !stroke.points?.some(item => {
+    const next = strokes.filter(stroke => (stroke.layerId || 'annotation') !== activeLayerId || !stroke.points?.some(item => {
       const dx = (item.x - point.x) * rect.width;
       const dy = (item.y - point.y) * rect.height;
       return Math.hypot(dx, dy) <= radius;
     }));
-    if (strokes.length !== before) {
-      redoStrokes = [];
+    if (next.length !== before) {
+      if (!active?.historySaved) {
+        remember();
+        if (active) active.historySaved = true;
+      }
+      strokes = next;
       save();
       draw();
       return true;
@@ -99,12 +110,13 @@ export function createInkLayer(canvas, storageKey, getTool) {
     if (!['ink', 'highlight', 'eraser'].includes(tool.mode) || active) return;
     activeSource = source;
     if (tool.mode === 'eraser') {
-      active = { eraser: true };
+      active = { eraser: true, historySaved: false };
       eraseAt(clientX, clientY);
       return;
     }
-    redoStrokes = [];
+    remember();
     active = {
+      id: `stroke-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       color: tool.color || (tool.mode === 'highlight' ? '#e2ef78' : '#173c36'),
       width: tool.width || (tool.mode === 'highlight' ? 16 : (inputType === 'pen' ? 2 : 2.4)),
       opacity: tool.opacity ?? (tool.mode === 'highlight' ? .32 : 1),
@@ -186,36 +198,69 @@ export function createInkLayer(canvas, storageKey, getTool) {
   return {
     clear(layerId = null) {
       const before = strokes.length;
-      strokes = layerId ? strokes.filter(stroke => (stroke.layerId || 'annotation') !== layerId) : [];
-      if (strokes.length === before) return false;
-      redoStrokes = [];
+      const next = layerId ? strokes.filter(stroke => (stroke.layerId || 'annotation') !== layerId) : [];
+      if (next.length === before) return false;
+      remember();
+      strokes = next;
       save();
       draw();
       return true;
     },
     undo() {
-      const layerId = toolState().layerId || 'annotation';
-      let index = strokes.length - 1;
-      while (index >= 0 && (strokes[index].layerId || 'annotation') !== layerId) index -= 1;
-      if (index < 0) return false;
-      const [stroke] = strokes.splice(index, 1);
-      redoStrokes.push(stroke);
+      if (!undoStack.length) return false;
+      redoStack.push(snapshot());
+      strokes = undoStack.pop();
       save();
       draw();
       return true;
     },
     redo() {
-      const layerId = toolState().layerId || 'annotation';
-      let index = redoStrokes.length - 1;
-      while (index >= 0 && (redoStrokes[index].layerId || 'annotation') !== layerId) index -= 1;
-      if (index < 0) return false;
-      const [stroke] = redoStrokes.splice(index, 1);
-      strokes.push(stroke);
+      if (!redoStack.length) return false;
+      undoStack.push(snapshot());
+      strokes = redoStack.pop();
       save();
       draw();
       return true;
     },
     hasInk(layerId = null) { return layerId ? strokes.some(stroke => (stroke.layerId || 'annotation') === layerId) : strokes.length > 0; },
+    selectInRect(rect, layerId = null) {
+      const left = Math.min(rect.left, rect.right);
+      const right = Math.max(rect.left, rect.right);
+      const top = Math.min(rect.top, rect.bottom);
+      const bottom = Math.max(rect.top, rect.bottom);
+      return strokes.filter(stroke => (!layerId || stroke.layerId === layerId) && stroke.points?.some(point => point.x >= left && point.x <= right && point.y >= top && point.y <= bottom)).map(stroke => stroke.id);
+    },
+    deleteSelection(ids = []) {
+      const selected = new Set(ids);
+      const before = strokes.length;
+      const next = strokes.filter(stroke => !selected.has(stroke.id));
+      if (next.length === before) return false;
+      remember();
+      strokes = next;
+      save(); draw(); return true;
+    },
+    duplicateSelection(ids = [], offset = { x: .025, y: .025 }) {
+      const selected = new Set(ids);
+      const copies = strokes.filter(stroke => selected.has(stroke.id)).map(stroke => ({ ...stroke, id: `stroke-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, points: stroke.points.map(point => ({ x: Math.max(0, Math.min(1, point.x + offset.x)), y: Math.max(0, Math.min(1, point.y + offset.y)) })) }));
+      if (!copies.length) return [];
+      remember();
+      strokes.push(...copies); save(); draw(); return copies.map(stroke => stroke.id);
+    },
+    transformSelection(ids = [], transform = {}) {
+      const selected = new Set(ids);
+      const dx = Number(transform.dx) || 0;
+      const dy = Number(transform.dy) || 0;
+      const scale = Number(transform.scale) || 1;
+      const origin = transform.origin || { x: .5, y: .5 };
+      if (!strokes.some(stroke => selected.has(stroke.id))) return false;
+      remember();
+      strokes = strokes.map(stroke => {
+        if (!selected.has(stroke.id)) return stroke;
+        return { ...stroke, points: stroke.points.map(point => ({ x: Math.max(0, Math.min(1, origin.x + (point.x - origin.x) * scale + dx)), y: Math.max(0, Math.min(1, origin.y + (point.y - origin.y) * scale + dy)) })) };
+      });
+      save(); draw();
+      return true;
+    },
     redraw() { draw(); },
     destroy() { observer?.disconnect(); removers.forEach(remove => remove()); }
   };
