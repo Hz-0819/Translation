@@ -3,6 +3,7 @@ import '@phosphor-icons/web/regular';
 import html2canvas from 'html2canvas';
 import { createBlankPage, renderSample, renderPdf, renderWord, renderImage } from './documents.js';
 import { createInkLayer } from './ink.js';
+import { bindPress } from './input.js';
 import { lookupWord, lookupCompleteWord, demoSentenceTranslation, normalizeWord } from './dictionary.js';
 import { selectedText, wordAtPoint, wordFromTarget, isSentenceSelection } from './selection.js';
 import { bookmarkStorageKey, normalizeBookmarkIndexes } from './navigation.js';
@@ -927,18 +928,6 @@ function showSentence(text) {
 
 renderSample(stack);
 updateMeta({ ...currentDoc, id: 'sample' });
-
-function bindPress(element, handler) {
-  let lastTouch = 0;
-  element.addEventListener('touchend', event => {
-    event.preventDefault();
-    lastTouch = Date.now();
-    handler(event);
-  }, { passive: false });
-  element.addEventListener('click', event => {
-    if (Date.now() - lastTouch > 500) handler(event);
-  });
-}
 
 const modeLabels = { ink: '笔', highlight: '荧光笔', eraser: '橡皮', lasso: '套索', lookup: '查词', pan: '浏览' };
 renderToolInstances();

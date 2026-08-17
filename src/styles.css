@@ -244,7 +244,10 @@ kbd { padding: 4px 7px; border: 1px solid var(--line); background: white; box-sh
   box-shadow: var(--toolbar-shadow);
   backdrop-filter: blur(20px) saturate(150%);
   transform: translateX(-50%);
+  pointer-events: auto;
+  isolation: isolate;
 }
+.toolrail button, .tool-popover button, .timer-popover button { position: relative; pointer-events: auto; }
 .tool-group { display: flex; align-items: center; gap: 3px; }
 .tool {
   width: 58px;
