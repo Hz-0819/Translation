@@ -460,14 +460,6 @@ function openToolSettings(instance = activeTool()) {
 function renderToolInstances() {
   const group = document.querySelector('#toolInstanceGroup');
   group.innerHTML = toolInstances.filter(item => item.visible).map(item => `<button class="tool ${item.id === activeToolId ? 'active' : ''}" data-tool-id="${escapeHtml(item.id)}" aria-label="${escapeHtml(item.name)}" aria-pressed="${item.id === activeToolId}">${icon(item.icon)}<span>${escapeHtml(item.name)}</span></button>`).join('');
-  group.querySelectorAll('[data-tool-id]').forEach(button => bindPress(button, () => {
-    const instance = toolInstances.find(item => item.id === button.dataset.toolId);
-    if (!instance) return;
-    if (activeToolId === instance.id) return openToolSettings(instance);
-    activeToolId = instance.id;
-    applyMode(toolMode(instance));
-    toast(`已切换到${instance.name}`);
-  }));
 }
 
 function mountInkLayers() {
@@ -938,7 +930,6 @@ showAppView('library');
 document.querySelectorAll('[data-app-view]').forEach(button => bindPress(button, () => {
   panel.classList.remove('open'); closeToolSettings(); showAppView(button.dataset.appView);
 }));
-bindPress(document.querySelector('#backLibraryButton'), () => showAppView('library'));
 bindPress(document.querySelector('#newBlankDocument'), createBlankResource);
 document.querySelector('#resourceSearch').addEventListener('input', event => renderResourceLibrary(event.target.value));
 bindPress(document.querySelector('#createMistakeBookButton'), () => {
@@ -951,17 +942,47 @@ bindPress(document.querySelector('#createMistakeBookButton'), () => {
     event.preventDefault(); const result = createMistakeBook(workspaceState, form.querySelector('input').value); workspaceState = result.state; saveWorkspaceState(); renderMistakeLibrary();
   });
 });
-bindPress(document.querySelector('#undoButton'), () => {
-  const changed = inkLayers[activeInkIndex]?.undo();
-  toast(changed ? '已撤销上一笔' : '当前页没有可撤销的笔迹');
-});
-bindPress(document.querySelector('#redoButton'), () => {
-  const changed = inkLayers[activeInkIndex]?.redo();
-  toast(changed ? '已重做上一笔' : '当前页没有可重做的笔迹');
-});
 let clearConfirmUntil = 0;
-bindPress(document.querySelector('#clearButton'), () => {
-  const button = document.querySelector('#clearButton');
+function runWorkspaceCommand(button) {
+  if (!button) return;
+  const instance = button.dataset.toolId ? toolInstances.find(item => item.id === button.dataset.toolId) : null;
+  if (instance) {
+    if (activeToolId === instance.id) openToolSettings(instance);
+    else {
+      activeToolId = instance.id;
+      applyMode(toolMode(instance));
+      toast(`已切换到${instance.name}`);
+    }
+    return;
+  }
+  if (button.id === 'backLibraryButton') return showAppView('library');
+  if (button.id === 'undoButton') {
+    const changed = inkLayers[activeInkIndex]?.undo();
+    return toast(changed ? '已撤销上一笔' : '当前页没有可撤销的笔迹');
+  }
+  if (button.id === 'redoButton') {
+    const changed = inkLayers[activeInkIndex]?.redo();
+    return toast(changed ? '已重做上一笔' : '当前页没有可重做的笔迹');
+  }
+  if (button.id === 'pagesButton') {
+    if (panel.classList.contains('open') && panel.dataset.view === 'pages') panel.classList.remove('open');
+    else showPanelView('pages');
+    return;
+  }
+  if (button.id === 'layersButton') return showPanelView('layers');
+  if (button.id === 'addToolButton') return openToolPicker();
+  if (button.id === 'settingsButton') return showPanelView('toolbar');
+  if (button.id === 'timerButton') {
+    const popover = document.querySelector('#timerPopover');
+    const willOpen = popover.hidden;
+    closeToolSettings();
+    panel.classList.remove('open');
+    popover.hidden = !willOpen;
+    button.setAttribute('aria-expanded', String(willOpen));
+    renderTimer();
+    return;
+  }
+  if (button.id !== 'clearButton') return;
   if (Date.now() > clearConfirmUntil) {
     clearConfirmUntil = Date.now() + 2600;
     button.classList.add('confirming');
@@ -973,12 +994,25 @@ bindPress(document.querySelector('#clearButton'), () => {
   button.classList.remove('confirming');
   const changed = inkLayers.reduce((count, layer) => count + Number(layer.clear()), 0);
   toast(changed ? '已清空全部笔迹' : '试卷上还没有笔迹');
+}
+
+const workspaceToolbar = document.querySelector('.toolrail');
+let lastWorkspacePointerActivation = 0;
+workspaceToolbar.addEventListener('pointerup', event => {
+  if (event.pointerType === 'mouse') return;
+  const button = event.target.closest('button');
+  if (!button || !workspaceToolbar.contains(button)) return;
+  event.preventDefault();
+  lastWorkspacePointerActivation = Date.now();
+  runWorkspaceCommand(button);
 });
-bindPress(document.querySelector('#pagesButton'), () => {
-  if (panel.classList.contains('open') && panel.dataset.view === 'pages') panel.classList.remove('open');
-  else showPanelView('pages');
+workspaceToolbar.addEventListener('click', event => {
+  if (Date.now() - lastWorkspacePointerActivation < 500) return;
+  const button = event.target.closest('button');
+  if (!button || !workspaceToolbar.contains(button)) return;
+  runWorkspaceCommand(button);
 });
-bindPress(document.querySelector('#layersButton'), () => showPanelView('layers'));
+
 bindPress(document.querySelector('#addPageButton'), addBlankPage);
 document.querySelectorAll('[data-panel-tab]').forEach(button => bindPress(button, () => showPanelView(button.dataset.panelTab)));
 bindPress(document.querySelector('#closePanel'), () => panel.classList.remove('open'));
@@ -1007,15 +1041,6 @@ function toggleTimer() {
   renderTimer();
 }
 
-bindPress(document.querySelector('#timerButton'), () => {
-  const popover = document.querySelector('#timerPopover');
-  const willOpen = popover.hidden;
-  closeToolSettings();
-  panel.classList.remove('open');
-  popover.hidden = !willOpen;
-  document.querySelector('#timerButton').setAttribute('aria-expanded', String(willOpen));
-  renderTimer();
-});
 bindPress(document.querySelector('#closeTimer'), () => {
   document.querySelector('#timerPopover').hidden = true;
   document.querySelector('#timerButton').setAttribute('aria-expanded', 'false');
@@ -1070,8 +1095,6 @@ function openToolPicker() {
   popover.hidden = false;
 }
 
-bindPress(document.querySelector('#addToolButton'), openToolPicker);
-bindPress(document.querySelector('#settingsButton'), () => showPanelView('toolbar'));
 bindPress(document.querySelector('#closeSettings'), event => {
   event.stopPropagation();
   closeToolSettings();
