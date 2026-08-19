@@ -22,6 +22,7 @@ test("storage schema exposes every first-version domain table", () => {
     schema.plans,
     schema.subscriptions,
     schema.usageRecords,
+    schema.uploadReservations,
   ];
 
   assert.deepEqual(tables.map(getTableName), [
@@ -40,5 +41,6 @@ test("storage schema exposes every first-version domain table", () => {
     "plans",
     "subscriptions",
     "usage_records",
+    "upload_reservations",
   ]);
 });

@@ -11,6 +11,7 @@ import { createDatabase } from "../src/db/client.js";
 import { documentObjects, users } from "../src/db/schema.js";
 import { PostgresDocumentRepository } from "../src/documents/postgres-repository.js";
 import { S3ObjectStore } from "../src/storage/object-store.js";
+import { PostgresUsageRepository } from "../src/usage/postgres-repository.js";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const s3Endpoint = process.env.TEST_S3_ENDPOINT;
@@ -46,6 +47,7 @@ test(
       authRepository: new PostgresAuthRepository(db),
       documentRepository: new PostgresDocumentRepository(db),
       objectStore,
+      usageRepository: new PostgresUsageRepository(db),
     });
     const emails: string[] = [];
     const documentIds: string[] = [];
@@ -99,6 +101,10 @@ test(
         },
       });
       assert.equal(session.statusCode, 201);
+      const reservedUsage = await app.inject({
+        method: "GET", url: "/api/usage", headers: { authorization: `Bearer ${ownerToken}` },
+      });
+      assert.equal(reservedUsage.json().reservedBytes, file.byteLength);
       const upload = session.json() as {
         objectId: string;
         uploadUrl: string;
@@ -120,6 +126,11 @@ test(
       });
       assert.equal(committed.statusCode, 200);
       assert.equal(committed.json().status, "verified");
+      const committedUsage = await app.inject({
+        method: "GET", url: "/api/usage", headers: { authorization: `Bearer ${ownerToken}` },
+      });
+      assert.equal(committedUsage.json().committedBytes, file.byteLength);
+      assert.equal(committedUsage.json().reservedBytes, 0);
 
       const duplicateCommit = await app.inject({
         method: "POST",

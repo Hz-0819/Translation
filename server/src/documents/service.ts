@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { ObjectStore } from "../storage/object-store.js";
+import type { UsageService } from "../usage/service.js";
 import type { DocumentRepository } from "./repository.js";
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024;
@@ -22,6 +23,7 @@ export class DocumentService {
   constructor(
     private readonly repository: DocumentRepository,
     private readonly objectStore: ObjectStore,
+    private readonly usage?: UsageService,
   ) {}
 
   async createUploadSession(input: {
@@ -43,7 +45,11 @@ export class DocumentService {
       const sameFile = existing.sha256 === input.sha256 &&
         existing.byteSize === input.byteSize && existing.mimeType === input.mimeType;
       if (existing.documentUserId !== input.userId || !sameFile) throw new DocumentClaimConflictError();
-      if (existing.status === "verified") return { objectId: existing.id, status: "verified" as const };
+      if (existing.status === "verified") {
+        await this.usage?.commit(input.documentId);
+        return { objectId: existing.id, status: "verified" as const };
+      }
+      if (existing.status === "failed") await this.usage?.reserve(input.userId, input.documentId, input.byteSize);
       const signed = await this.objectStore.createUploadUrl({
         objectKey: existing.objectKey,
         mimeType: existing.mimeType,
@@ -54,26 +60,32 @@ export class DocumentService {
 
     const objectId = randomUUID();
     const objectKey = `${input.userId}/${input.documentId}/${objectId}`;
-    await this.repository.createPendingUpload({
-      document: {
-        id: input.documentId,
-        userId: input.userId,
-        title: input.title,
-        mimeType: input.mimeType,
-        sourceKind: input.sourceKind,
-        pageCount: input.pageCount,
-      },
-      object: {
-        id: objectId,
-        documentId: input.documentId,
-        userId: input.userId,
-        objectKey,
-        sha256: input.sha256,
-        byteSize: input.byteSize,
-        mimeType: input.mimeType,
-        status: "pending",
-      },
-    });
+    await this.usage?.reserve(input.userId, input.documentId, input.byteSize);
+    try {
+      await this.repository.createPendingUpload({
+        document: {
+          id: input.documentId,
+          userId: input.userId,
+          title: input.title,
+          mimeType: input.mimeType,
+          sourceKind: input.sourceKind,
+          pageCount: input.pageCount,
+        },
+        object: {
+          id: objectId,
+          documentId: input.documentId,
+          userId: input.userId,
+          objectKey,
+          sha256: input.sha256,
+          byteSize: input.byteSize,
+          mimeType: input.mimeType,
+          status: "pending",
+        },
+      });
+    } catch (error) {
+      await this.usage?.release(input.documentId);
+      throw error;
+    }
     const signed = await this.objectStore.createUploadUrl({
       objectKey,
       mimeType: input.mimeType,
@@ -96,10 +108,12 @@ export class DocumentService {
       stored.mimeType !== record.mimeType
     ) {
       await this.repository.markFailed(objectId, "object_metadata_mismatch");
+      await this.usage?.release(documentId);
       throw new ObjectVerificationError();
     }
 
     await this.repository.markVerified(documentId, objectId);
+    await this.usage?.commit(documentId);
     return { status: "verified" };
   }
 

@@ -15,6 +15,9 @@ import type { ObjectStore } from "./storage/object-store.js";
 import { registerSyncRoutes } from "./sync/routes.js";
 import type { SyncRepository } from "./sync/repository.js";
 import { SyncService } from "./sync/service.js";
+import type { UsageRepository } from "./usage/repository.js";
+import { registerUsageRoutes } from "./usage/routes.js";
+import { UsageService } from "./usage/service.js";
 
 type BuildAppOptions = {
   config?: AppConfig;
@@ -22,6 +25,7 @@ type BuildAppOptions = {
   documentRepository?: DocumentRepository;
   objectStore?: ObjectStore;
   syncRepository?: SyncRepository;
+  usageRepository?: UsageRepository;
 };
 
 function isAllowedWebOrigin(origin: string | undefined, config: AppConfig) {
@@ -54,17 +58,19 @@ export function buildApp(options: BuildAppOptions = {}) {
       await authApp.register(helmet);
       await authApp.register(rateLimit, { global: false });
       const authService = new AuthService(authRepository, config);
+      const usageService = options.usageRepository ? new UsageService(options.usageRepository) : undefined;
       registerAuthRoutes(authApp, authService, config);
       if (options.documentRepository && options.objectStore) {
         registerDocumentRoutes(
           authApp,
-          new DocumentService(options.documentRepository, options.objectStore),
+          new DocumentService(options.documentRepository, options.objectStore, usageService),
           authService,
         );
       }
       if (options.syncRepository) {
         registerSyncRoutes(authApp, new SyncService(options.syncRepository), authService);
       }
+      if (usageService) registerUsageRoutes(authApp, usageService, authService);
     });
   }
 

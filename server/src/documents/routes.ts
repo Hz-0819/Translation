@@ -11,6 +11,7 @@ import {
   ObjectVerificationError,
   UploadNotReadyError,
 } from "./service.js";
+import { FileQuotaExceededError, StorageQuotaExceededError } from "../usage/service.js";
 
 const uploadSchema = z.object({
   documentId: z.string().uuid(),
@@ -38,6 +39,12 @@ export function registerDocumentRoutes(app: FastifyInstance, service: DocumentSe
       }
       if (error instanceof DocumentClaimConflictError) {
         return reply.code(409).send({ message: "资料已属于其他账号或文件内容不一致" });
+      }
+      if (error instanceof FileQuotaExceededError) {
+        return reply.code(413).send({ message: "文件超过当前套餐的单文件限制" });
+      }
+      if (error instanceof StorageQuotaExceededError) {
+        return reply.code(409).send({ message: "云端存储空间不足，请清理资料或升级套餐" });
       }
       throw error;
     }

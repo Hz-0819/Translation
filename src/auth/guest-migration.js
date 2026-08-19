@@ -58,6 +58,10 @@ export class DocumentUploadApi {
   commit(documentId, objectId) {
     return this.authenticated(`/api/documents/${documentId}/objects/${objectId}/commit`, { method: 'POST' });
   }
+
+  getUsage() {
+    return this.authenticated('/api/usage');
+  }
 }
 
 export class GuestMigration {

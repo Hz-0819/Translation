@@ -15,6 +15,13 @@
       "when": 1787163598630,
       "tag": "0001_amusing_jack_murdock",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787165098734,
+      "tag": "0002_violet_bullseye",
+      "breakpoints": true
     }
   ]
 }

@@ -61,6 +61,11 @@ svg { width: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-l
 .signed-in-row { display: flex; justify-content: space-between; gap: 14px; margin: 22px 0; padding: 13px 0; border-bottom: 1px solid var(--line); font-size: 10px; }
 .signed-in-row span { display: flex; align-items: center; gap: 6px; color: #477455; }
 .signed-in-row strong { overflow: hidden; text-overflow: ellipsis; }
+.usage-card { margin: -8px 0 22px; padding: 14px; background: rgba(23,60,54,.045); }
+.usage-card > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 10px; }
+.usage-card > div span, .usage-card small { color: var(--ink-soft); font: 9px 'DM Mono'; }
+.usage-card > i { display: block; height: 3px; margin: 11px 0 8px; background: rgba(23,60,54,.12); }
+.usage-card > i b { display: block; height: 100%; background: var(--ink); }
 .migration-intro strong { font-size: 15px; }
 .migration-intro p, .sync-empty p { margin: 7px 0 16px; color: var(--ink-soft); font-size: 10px; line-height: 1.7; }
 .migration-list { display: grid; gap: 8px; max-height: 300px; overflow: auto; }

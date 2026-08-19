@@ -262,3 +262,20 @@ export const usageRecords = pgTable(
   },
   (table) => [uniqueIndex("usage_records_period_unique").on(table.userId, table.metric, table.periodStart)],
 );
+
+export const uploadReservations = pgTable(
+  "upload_reservations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id").notNull(),
+    byteSize: bigint("byte_size", { mode: "number" }).notNull(),
+    status: varchar("status", { length: 40 }).notNull().default("pending"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("upload_reservations_document_unique").on(table.documentId),
+    index("upload_reservations_user_status_idx").on(table.userId, table.status),
+  ],
+);

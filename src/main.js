@@ -1298,11 +1298,18 @@ function renderAuthMode(mode) {
 
 async function renderMigrationReview() {
   const pane = document.querySelector('#migrationPane');
-  const candidates = await guestMigration.candidates(authStore.user.id);
+  const [candidates, usage] = await Promise.all([
+    guestMigration.candidates(authStore.user.id),
+    uploadApi.getUsage().catch(() => null)
+  ]);
   document.querySelector('#authPane').hidden = true;
   pane.hidden = false;
   document.querySelector('#accountDialogTitle').textContent = '账号与资料同步';
+  const usedBytes = usage ? usage.committedBytes + usage.reservedBytes : 0;
+  const usagePercent = usage ? Math.min(100, Math.round(usedBytes / usage.plan.storageLimitBytes * 100)) : 0;
+  const formatStorage = bytes => bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`;
   pane.innerHTML = `<div class="signed-in-row"><span>${icon('check-circle')} 已登录</span><strong>${escapeHtml(authStore.user.email)}</strong></div>
+    ${usage ? `<div class="usage-card"><div><strong>${escapeHtml(usage.plan.name)}</strong><span>${formatStorage(usedBytes)} / ${formatStorage(usage.plan.storageLimitBytes)}</span></div><i><b style="width:${usagePercent}%"></b></i><small>单个文件上限 ${formatStorage(usage.plan.perFileLimitBytes)}</small></div>` : ''}
     ${candidates.length ? `<div class="migration-intro"><strong>将本机资料同步到此账号</strong><p>请选择需要跨设备使用的资料。未选资料会继续只保存在本机。</p></div><div class="migration-list">${candidates.map(document => `<label data-migration-document="${document.id}"><input type="checkbox" value="${document.id}" checked><span><strong>${escapeHtml(document.title)}</strong><small data-migration-status>等待同步</small></span></label>`).join('')}</div><div class="migration-actions"><button id="keepLocalButton">暂时仅保存在本机</button><button id="startMigrationButton">同步所选资料</button></div>` : `<div class="sync-empty">${icon('cloud-check')}<strong>当前资料已就绪</strong><p>已同步的资料仍保留本机副本，可以离线打开。</p></div>`}
     <button class="logout-button" id="logoutButton">退出登录</button>`;
   pane.querySelector('#keepLocalButton')?.addEventListener('click', closeAccountDialog);
