@@ -1,7 +1,9 @@
 import './styles.css';
 import '@phosphor-icons/web/regular';
 import html2canvas from 'html2canvas';
-import { createBlankPage, renderSample, renderPdf, renderWord, renderImage } from './documents.js';
+import { classifyDocumentFile, createBlankPage, renderLocalFile, renderSample } from './documents.js';
+import { DocumentLibrary, mergeDocumentCatalog } from './document-library.js';
+import { DocumentRepository } from './storage/document-repository.js';
 import { createInkLayer } from './ink.js';
 import { bindPress } from './input.js';
 import { lookupWord, lookupCompleteWord, demoSentenceTranslation, normalizeWord } from './dictionary.js';
@@ -130,6 +132,25 @@ let timerPresetSeconds = timerSeconds;
 let timerInterval = null;
 const stack = document.querySelector('#paperStack');
 const panel = document.querySelector('#lookupPanel');
+const documentRepository = new DocumentRepository();
+let activeDocumentObjectUrls = [];
+
+function releaseDocumentObjectUrls() {
+  activeDocumentObjectUrls.forEach(url => URL.revokeObjectURL(url));
+  activeDocumentObjectUrls = [];
+}
+
+const documentLibrary = new DocumentLibrary({
+  repository: documentRepository,
+  renderFile: async file => {
+    releaseDocumentObjectUrls();
+    const rendered = await renderLocalFile(file, stack, message => {
+      document.querySelector('#saveState').textContent = message;
+    });
+    activeDocumentObjectUrls = rendered.objectUrls || [];
+    return rendered;
+  }
+});
 
 function loadWorkspaceState() {
   try { return normalizeWorkspaceState(JSON.parse(localStorage.getItem(WORKSPACE_KEY) || 'null')); }
@@ -194,7 +215,12 @@ function renderResourceLibrary(query = '') {
   const target = document.querySelector('#resourceGrid');
   const normalized = query.trim().toLocaleLowerCase();
   const documents = workspaceState.documents.filter(doc => !normalized || `${doc.title} ${(doc.tags || []).join(' ')}`.toLocaleLowerCase().includes(normalized));
-  target.innerHTML = documents.length ? documents.map(doc => `<button class="resource-card" data-resource-id="${escapeHtml(doc.id)}"><span class="resource-cover">${icon(doc.type === 'sample' ? 'book-open-text' : doc.type === 'blank' ? 'notepad' : 'file-text')}<small>${escapeHtml((doc.type || 'FILE').toUpperCase())}</small></span><span class="resource-info"><strong>${escapeHtml(doc.title)}</strong><small>${(doc.tags || []).map(tag => `#${escapeHtml(tag)}`).join(' ') || '本机资料'}</small></span>${icon('arrow-right')}</button>`).join('') : `<div class="home-empty">${icon('folder-dashed')}<strong>没有找到资料</strong><p>换一个关键词，或上传新的文件。</p></div>`;
+  target.innerHTML = documents.length ? documents.map(doc => {
+    const detail = doc.localAvailability === 'missing-local-file'
+      ? '本机文件待恢复'
+      : ((doc.tags || []).map(tag => `#${escapeHtml(tag)}`).join(' ') || (doc.syncStatus === 'synced' ? '已同步' : '本机资料'));
+    return `<button class="resource-card" data-resource-id="${escapeHtml(doc.id)}"><span class="resource-cover">${icon(doc.type === 'sample' ? 'book-open-text' : doc.type === 'blank' ? 'notepad' : 'file-text')}<small>${escapeHtml((doc.type || 'FILE').toUpperCase())}</small></span><span class="resource-info"><strong>${escapeHtml(doc.title)}</strong><small>${detail}</small></span>${icon('arrow-right')}</button>`;
+  }).join('') : `<div class="home-empty">${icon('folder-dashed')}<strong>没有找到资料</strong><p>换一个关键词，或上传新的文件。</p></div>`;
   target.querySelectorAll('[data-resource-id]').forEach(button => button.addEventListener('click', () => openResource(button.dataset.resourceId)));
 }
 
@@ -204,23 +230,23 @@ function renderMistakeLibrary() {
     const entries = workspaceState.mistakeEntries.filter(item => item.bookId === book.id);
     return `<section class="mistake-book-card"><header><span style="--book-color:${escapeHtml(book.color || '#d8ef8f')}">${icon('notebook')}</span><div><strong>${escapeHtml(book.name)}</strong><small>${entries.length} 道错题 · 跨文件收录</small></div></header><div class="mistake-entry-grid">${entries.length ? entries.slice(0, 6).map(entry => `<button data-source-document="${escapeHtml(entry.documentId)}" data-source-page="${entry.pageIndex}"><img src="${entry.image}" alt="${escapeHtml(entry.documentTitle)}第 ${entry.pageIndex + 1} 页"><span>${escapeHtml(entry.documentTitle)} · 第 ${entry.pageIndex + 1} 页</span></button>`).join('') : `<p>还没有内容。可以在资料中用套索添加。</p>`}</div></section>`;
   }).join('');
-  target.querySelectorAll('[data-source-document]').forEach(button => button.addEventListener('click', () => {
-    if (button.dataset.sourceDocument !== 'sample' && button.dataset.sourceDocument !== currentDocumentId) return toast('该本地文件需要重新打开后才能跳转');
-    openResource(button.dataset.sourceDocument, Number(button.dataset.sourcePage));
+  target.querySelectorAll('[data-source-document]').forEach(button => button.addEventListener('click', async () => {
+    await openResource(button.dataset.sourceDocument, Number(button.dataset.sourcePage));
   }));
 }
 
 function registerDocument(doc) {
   const existing = workspaceState.documents.find(item => item.id === doc.id);
-  const record = { id: doc.id, title: doc.title, type: doc.type, tags: doc.tags || [], createdAt: existing?.createdAt || Date.now(), updatedAt: Date.now(), lastOpenedAt: Date.now() };
+  const record = { ...existing, ...doc, id: doc.id, title: doc.title, type: doc.type, tags: doc.tags || [], createdAt: existing?.createdAt || doc.createdAt || Date.now(), updatedAt: Date.now(), lastOpenedAt: Date.now() };
   workspaceState = { ...workspaceState, documents: existing ? workspaceState.documents.map(item => item.id === doc.id ? { ...item, ...record } : item) : [record, ...workspaceState.documents] };
   saveWorkspaceState();
 }
 
-function openResource(id, pageIndex = 0) {
+async function openResource(id, pageIndex = 0) {
   const doc = workspaceState.documents.find(item => item.id === id);
   if (!doc) return;
   if (id === 'sample') {
+    releaseDocumentObjectUrls();
     currentDocumentId = 'sample';
     const rendered = renderSample(stack);
     updateMeta({ ...rendered, id: 'sample' });
@@ -233,10 +259,31 @@ function openResource(id, pageIndex = 0) {
     requestAnimationFrame(() => goToPage(pageIndex));
     return;
   }
-  toast('此本地资料需要重新上传后打开');
+  const saveState = document.querySelector('#saveState');
+  saveState.textContent = '正在从本机资料库读取…';
+  try {
+    const result = await documentLibrary.openResource(id);
+    if (result.status === 'missing-local-file') {
+      registerDocument(result.document);
+      renderResourceLibrary();
+      return toast('本机文件副本已丢失，后续可从云端恢复或重新导入');
+    }
+    if (result.status !== 'opened') return toast('没有找到这份资料');
+    currentDocumentId = id;
+    registerDocument(result.document);
+    updateMeta(result.document);
+    showAppView('document');
+    saveState.textContent = '已保存在本机';
+    if (pageIndex) requestAnimationFrame(() => goToPage(pageIndex));
+  } catch (error) {
+    console.error(error);
+    saveState.textContent = '打开失败';
+    toast(error.message || '资料打开失败');
+  }
 }
 
 function createBlankResource() {
+  releaseDocumentObjectUrls();
   const id = `blank-${Date.now()}`;
   const title = `空白笔记 ${new Date().toLocaleDateString('zh-CN')}`;
   stack.replaceChildren(createBlankPage(`${id}-1`));
@@ -1160,18 +1207,14 @@ async function importLocalFile(file, input) {
   const saveState = document.querySelector('#saveState');
   saveState.textContent = '正在本地处理…';
   try {
-    let doc;
-    if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) doc = await renderPdf(file, stack, message => saveState.textContent = message);
-    else if (file.name.toLowerCase().endsWith('.docx')) doc = await renderWord(file, stack);
-    else if (file.type.startsWith('image/')) doc = await renderImage(file, stack);
-    else throw new Error('当前本地 Demo 暂不支持旧版 .doc，请先另存为 .docx');
-    const id = `file-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    doc = { ...doc, id, tags: [] };
-    currentDocumentId = id;
+    const type = classifyDocumentFile(file);
+    if (!type || type === 'legacy-doc') throw new Error(type === 'legacy-doc' ? '暂不支持旧版 .doc，请先另存为 .docx' : '暂不支持这种文件格式');
+    const doc = await documentLibrary.importFile(file, { type, tags: [] });
+    currentDocumentId = doc.id;
     registerDocument(doc);
     updateMeta(doc);
     showAppView('document');
-    saveState.textContent = '仅保存在本机';
+    saveState.textContent = '已保存在本机';
     if (doc.failedPages?.length) toast(`试卷已载入，${doc.failedPages.length} 页暂时无法显示`);
     else if (doc.textLayerFallbacks?.length) toast('试卷已显示；当前浏览器暂不能点选部分文字');
     else toast('试卷已载入');
@@ -1185,3 +1228,20 @@ async function importLocalFile(file, input) {
 }
 
 document.querySelectorAll('#fileInput,[data-library-upload]').forEach(input => input.addEventListener('change', event => importLocalFile(event.target.files?.[0], input)));
+
+async function hydrateDocumentLibrary() {
+  try {
+    const storedDocuments = await documentLibrary.listDocuments();
+    workspaceState = {
+      ...workspaceState,
+      documents: mergeDocumentCatalog(workspaceState.documents, storedDocuments)
+    };
+    saveWorkspaceState();
+    renderResourceLibrary(document.querySelector('#resourceSearch').value);
+  } catch (error) {
+    console.error(error);
+    toast('当前浏览器无法读取本地资料库');
+  }
+}
+
+hydrateDocumentLibrary();

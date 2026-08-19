@@ -252,5 +252,23 @@ export async function renderImage(file, container) {
   const page = pageShell(`<img class="uploaded-image" src="${url}" alt="上传的试卷"><div class="ocr-banner">图片已载入 · OCR 接口将在下一阶段接入</div>`, 'image-1', 'image-page');
   page.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
   container.append(page);
-  return { type: 'image', pages: 1, title: file.name };
+  return { type: 'image', pages: 1, title: file.name, objectUrls: [url] };
+}
+
+export function classifyDocumentFile(file) {
+  const name = String(file?.name || '').toLowerCase();
+  if (file?.type === 'application/pdf' || name.endsWith('.pdf')) return 'pdf';
+  if (name.endsWith('.docx')) return 'docx';
+  if (String(file?.type || '').startsWith('image/')) return 'image';
+  if (name.endsWith('.doc')) return 'legacy-doc';
+  return null;
+}
+
+export async function renderLocalFile(file, container, onProgress = () => {}) {
+  const type = classifyDocumentFile(file);
+  if (type === 'pdf') return renderPdf(file, container, onProgress);
+  if (type === 'docx') return renderWord(file, container);
+  if (type === 'image') return renderImage(file, container);
+  if (type === 'legacy-doc') throw new Error('暂不支持旧版 .doc，请先另存为 .docx');
+  throw new Error('暂不支持这种文件格式');
 }
