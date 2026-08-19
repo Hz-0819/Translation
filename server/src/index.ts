@@ -4,6 +4,7 @@ import { loadConfig } from "./config.js";
 import { createDatabase } from "./db/client.js";
 import { PostgresDocumentRepository } from "./documents/postgres-repository.js";
 import { S3ObjectStore } from "./storage/object-store.js";
+import { PostgresSyncRepository } from "./sync/postgres-repository.js";
 
 const config = loadConfig();
 const { client, db } = createDatabase(config);
@@ -14,6 +15,7 @@ const app = buildApp({
   authRepository: new PostgresAuthRepository(db),
   documentRepository: new PostgresDocumentRepository(db),
   objectStore,
+  syncRepository: new PostgresSyncRepository(db),
 });
 app.addHook("onClose", async () => client.end());
 

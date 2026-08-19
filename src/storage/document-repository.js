@@ -125,6 +125,34 @@ export class DocumentRepository {
     return ackOperations(await this.databasePromise, operationIds);
   }
 
+  async getSyncState(key) {
+    const database = await this.databasePromise;
+    const transaction = database.transaction(STORE_NAMES.syncState, 'readonly');
+    return (await requestResult(transaction.objectStore(STORE_NAMES.syncState).get(key))) || null;
+  }
+
+  async setSyncState(key, value) {
+    const database = await this.databasePromise;
+    const transaction = database.transaction(STORE_NAMES.syncState, 'readwrite');
+    const completed = transactionComplete(transaction);
+    await requestResult(transaction.objectStore(STORE_NAMES.syncState).put({ key, ...value, updatedAt: Date.now() }));
+    await completed;
+  }
+
+  async applyRemoteOperations(operations, cursor) {
+    const database = await this.databasePromise;
+    const transaction = database.transaction([STORE_NAMES.operations, STORE_NAMES.syncState], 'readwrite');
+    const completed = transactionComplete(transaction);
+    const operationStore = transaction.objectStore(STORE_NAMES.operations);
+    for (const operation of operations || []) {
+      operationStore.put({ ...operation, status: 'remote-applied', updatedAt: Date.now() });
+    }
+    transaction.objectStore(STORE_NAMES.syncState).put({
+      key: 'serverCursor', cursor: Number(cursor) || 0, updatedAt: Date.now()
+    });
+    await completed;
+  }
+
   close() {
     if (this.database) this.database.close();
     else this.databasePromise.then(database => database.close());

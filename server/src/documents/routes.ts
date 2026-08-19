@@ -1,7 +1,8 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
 import type { AuthService } from "../auth/service.js";
+import { authenticatedUserId } from "../auth/guard.js";
 import {
   DocumentNotFoundError,
   DocumentService,
@@ -21,22 +22,6 @@ const uploadSchema = z.object({
 });
 const objectParams = z.object({ documentId: z.string().uuid(), objectId: z.string().uuid() });
 const documentParams = z.object({ documentId: z.string().uuid() });
-
-async function authenticatedUserId(request: FastifyRequest, reply: FastifyReply, auth: AuthService) {
-  const [scheme, token] = request.headers.authorization?.split(" ") ?? [];
-  if (scheme !== "Bearer" || !token) {
-    await reply.code(401).send({ message: "请先登录" });
-    return null;
-  }
-  try {
-    const payload = await auth.verifyAccessToken(token);
-    if (typeof payload.sub !== "string") throw new Error("missing subject");
-    return payload.sub;
-  } catch {
-    await reply.code(401).send({ message: "登录已失效" });
-    return null;
-  }
-}
 
 export function registerDocumentRoutes(app: FastifyInstance, service: DocumentService, auth: AuthService) {
   app.post("/api/documents/upload-sessions", async (request, reply) => {

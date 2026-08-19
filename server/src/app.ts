@@ -12,12 +12,16 @@ import { registerDocumentRoutes } from "./documents/routes.js";
 import type { DocumentRepository } from "./documents/repository.js";
 import { DocumentService } from "./documents/service.js";
 import type { ObjectStore } from "./storage/object-store.js";
+import { registerSyncRoutes } from "./sync/routes.js";
+import type { SyncRepository } from "./sync/repository.js";
+import { SyncService } from "./sync/service.js";
 
 type BuildAppOptions = {
   config?: AppConfig;
   authRepository?: AuthRepository;
   documentRepository?: DocumentRepository;
   objectStore?: ObjectStore;
+  syncRepository?: SyncRepository;
 };
 
 export function buildApp(options: BuildAppOptions = {}) {
@@ -43,6 +47,9 @@ export function buildApp(options: BuildAppOptions = {}) {
           new DocumentService(options.documentRepository, options.objectStore),
           authService,
         );
+      }
+      if (options.syncRepository) {
+        registerSyncRoutes(authApp, new SyncService(options.syncRepository), authService);
       }
     });
   }

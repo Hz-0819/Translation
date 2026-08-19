@@ -135,6 +135,19 @@ const panel = document.querySelector('#lookupPanel');
 const documentRepository = new DocumentRepository();
 let activeDocumentObjectUrls = [];
 
+function syncableDocumentId(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value || '');
+}
+
+function queueDocumentOperation(type, payload, documentId = currentDocumentId) {
+  if (!syncableDocumentId(documentId)) return;
+  const id = globalThis.crypto?.randomUUID?.();
+  if (!id) return;
+  documentRepository.enqueueOperation({
+    id, documentId, type, payload, createdAt: Date.now()
+  }).catch(error => console.warn('Unable to queue sync operation', error));
+}
+
 function releaseDocumentObjectUrls() {
   activeDocumentObjectUrls.forEach(url => URL.revokeObjectURL(url));
   activeDocumentObjectUrls = [];
@@ -344,6 +357,7 @@ async function saveLassoCapture(page, pageIndex, rect, destination, bookId = '')
     if (destination === 'excerpt') {
       workspaceState = addExcerpt(workspaceState, currentDocumentId, { pageIndex, image }).state;
       saveWorkspaceState();
+      queueDocumentOperation('excerpt.created', { pageIndex, image });
       toast('已保存为书摘，可在“书摘”中添加笔记');
       if (panel.dataset.view === 'excerpts') renderExcerpts();
       return;
@@ -357,6 +371,7 @@ async function saveLassoCapture(page, pageIndex, rect, destination, bookId = '')
       image
     });
     saveWorkspaceState();
+    queueDocumentOperation('mistake.created', { bookId: destinationId, pageIndex, image, documentTitle: currentDoc.title });
     const book = workspaceState.mistakeBooks.find(item => item.id === destinationId);
     toast(`已收录到“${book?.name || '错题本'}”`);
   } catch (error) {
@@ -542,7 +557,7 @@ function mountInkLayers() {
     return createInkLayer(canvas, `paperlingo:${currentDoc.title}:${index}`, () => ({
       mode, ...(activeTool()?.params || {}), toolId: activeToolId, layerId: activeLayerId,
       hiddenLayers: documentLayers.filter(layer => !layer.visible).map(layer => layer.id)
-    }));
+    }), change => queueDocumentOperation('ink.page.replaced', { pageIndex: index, ...change }));
   });
   activeInkIndex = Math.min(activeInkIndex, Math.max(0, inkLayers.length - 1));
   pageObserver?.disconnect();
@@ -719,11 +734,14 @@ function renderOutline() {
   target.querySelector('#outlineCreateForm').addEventListener('submit', event => {
     event.preventDefault();
     const result = addOutlineNode(workspaceState, currentDocumentId, { label: target.querySelector('#outlineLabel').value, pageIndex: activeInkIndex, parentId: target.querySelector('#outlineParent').value || null });
-    workspaceState = result.state; saveWorkspaceState(); renderOutline(); toast('已添加到大纲');
+    workspaceState = result.state; saveWorkspaceState();
+    queueDocumentOperation('outline.created', result.node);
+    renderOutline(); toast('已添加到大纲');
   });
   target.querySelectorAll('[data-outline-page]').forEach(button => button.addEventListener('click', () => goToPage(Number(button.dataset.outlinePage))));
   target.querySelectorAll('[data-outline-remove]').forEach(button => button.addEventListener('click', () => {
     workspaceState = { ...workspaceState, outlinesByDocument: { ...workspaceState.outlinesByDocument, [currentDocumentId]: items.filter(item => item.id !== button.dataset.outlineRemove && item.parentId !== button.dataset.outlineRemove) } };
+    queueDocumentOperation('outline.deleted', { id: button.dataset.outlineRemove });
     saveWorkspaceState(); renderOutline();
   }));
 }
@@ -834,6 +852,7 @@ function renderLayers() {
       if (!layer) return;
       layer.name = event.target.value.trim().slice(0, 30) || layer.name;
       saveLayers();
+      queueDocumentOperation('layer.updated', { ...layer });
       renderLayers();
     });
     row.querySelector('.layer-visibility').addEventListener('click', () => {
@@ -841,6 +860,7 @@ function renderLayers() {
       if (!layer) return;
       layer.visible = !layer.visible;
       saveLayers();
+      queueDocumentOperation('layer.updated', { ...layer });
       inkLayers.forEach(ink => ink.redraw());
       renderLayers();
     });
@@ -848,6 +868,7 @@ function renderLayers() {
       if (documentLayers.length === 1) return;
       const index = documentLayers.findIndex(item => item.id === id);
       documentLayers.splice(index, 1);
+      queueDocumentOperation('layer.deleted', { id });
       if (activeLayerId === id) activeLayerId = documentLayers[Math.max(0, index - 1)].id;
       saveLayers();
       inkLayers.forEach(ink => ink.redraw());
@@ -858,6 +879,7 @@ function renderLayers() {
   target.querySelector('#addLayerButton').addEventListener('click', () => {
     const id = `layer-${Date.now()}`;
     documentLayers.push({ id, name: `图层 ${documentLayers.length + 1}`, visible: true });
+    queueDocumentOperation('layer.created', documentLayers.at(-1));
     activeLayerId = id;
     saveLayers();
     renderLayers();

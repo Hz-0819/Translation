@@ -18,7 +18,7 @@ export function parseStoredStrokes(raw) {
   }
 }
 
-export function createInkLayer(canvas, storageKey, getTool) {
+export function createInkLayer(canvas, storageKey, getTool, onChange = () => {}) {
   const ctx = canvas.getContext('2d');
   let stored = '[]';
   try { stored = localStorage.getItem(storageKey) || '[]'; } catch { /* Private browsing fallback. */ }
@@ -73,6 +73,7 @@ export function createInkLayer(canvas, storageKey, getTool) {
     try { localStorage.setItem(storageKey, JSON.stringify(strokes)); } catch { /* Continue without persistence. */ }
   };
   const snapshot = () => strokes.map(stroke => ({ ...stroke, points: stroke.points?.map(point => ({ ...point })) || [] }));
+  const notify = reason => onChange({ reason, strokes: snapshot() });
   const remember = () => {
     undoStack.push(snapshot());
     if (undoStack.length > 80) undoStack.shift();
@@ -138,9 +139,11 @@ export function createInkLayer(canvas, storageKey, getTool) {
   };
   const finish = source => {
     if (!active || activeSource !== source) return;
+    const reason = active.eraser ? 'erase' : 'draw';
     active = null;
     activeSource = '';
     save();
+    notify(reason);
   };
   const removers = [];
   const listen = (target, type, handler, options) => {
@@ -204,6 +207,7 @@ export function createInkLayer(canvas, storageKey, getTool) {
       strokes = next;
       save();
       draw();
+      notify('clear');
       return true;
     },
     undo() {
@@ -212,6 +216,7 @@ export function createInkLayer(canvas, storageKey, getTool) {
       strokes = undoStack.pop();
       save();
       draw();
+      notify('undo');
       return true;
     },
     redo() {
@@ -220,6 +225,7 @@ export function createInkLayer(canvas, storageKey, getTool) {
       strokes = redoStack.pop();
       save();
       draw();
+      notify('redo');
       return true;
     },
     hasInk(layerId = null) { return layerId ? strokes.some(stroke => (stroke.layerId || 'annotation') === layerId) : strokes.length > 0; },
@@ -237,14 +243,14 @@ export function createInkLayer(canvas, storageKey, getTool) {
       if (next.length === before) return false;
       remember();
       strokes = next;
-      save(); draw(); return true;
+      save(); draw(); notify('selection-delete'); return true;
     },
     duplicateSelection(ids = [], offset = { x: .025, y: .025 }) {
       const selected = new Set(ids);
       const copies = strokes.filter(stroke => selected.has(stroke.id)).map(stroke => ({ ...stroke, id: `stroke-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, points: stroke.points.map(point => ({ x: Math.max(0, Math.min(1, point.x + offset.x)), y: Math.max(0, Math.min(1, point.y + offset.y)) })) }));
       if (!copies.length) return [];
       remember();
-      strokes.push(...copies); save(); draw(); return copies.map(stroke => stroke.id);
+      strokes.push(...copies); save(); draw(); notify('selection-duplicate'); return copies.map(stroke => stroke.id);
     },
     transformSelection(ids = [], transform = {}) {
       const selected = new Set(ids);
@@ -258,7 +264,7 @@ export function createInkLayer(canvas, storageKey, getTool) {
         if (!selected.has(stroke.id)) return stroke;
         return { ...stroke, points: stroke.points.map(point => ({ x: Math.max(0, Math.min(1, origin.x + (point.x - origin.x) * scale + dx)), y: Math.max(0, Math.min(1, origin.y + (point.y - origin.y) * scale + dy)) })) };
       });
-      save(); draw();
+      save(); draw(); notify('selection-transform');
       return true;
     },
     redraw() { draw(); },
