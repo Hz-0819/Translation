@@ -8,10 +8,16 @@ import { registerAuthRoutes } from "./auth/routes.js";
 import type { AuthRepository } from "./auth/repository.js";
 import { AuthService } from "./auth/service.js";
 import type { AppConfig } from "./config.js";
+import { registerDocumentRoutes } from "./documents/routes.js";
+import type { DocumentRepository } from "./documents/repository.js";
+import { DocumentService } from "./documents/service.js";
+import type { ObjectStore } from "./storage/object-store.js";
 
 type BuildAppOptions = {
   config?: AppConfig;
   authRepository?: AuthRepository;
+  documentRepository?: DocumentRepository;
+  objectStore?: ObjectStore;
 };
 
 export function buildApp(options: BuildAppOptions = {}) {
@@ -29,7 +35,15 @@ export function buildApp(options: BuildAppOptions = {}) {
       await authApp.register(cookie);
       await authApp.register(helmet);
       await authApp.register(rateLimit, { global: false });
-      registerAuthRoutes(authApp, new AuthService(authRepository, config), config);
+      const authService = new AuthService(authRepository, config);
+      registerAuthRoutes(authApp, authService, config);
+      if (options.documentRepository && options.objectStore) {
+        registerDocumentRoutes(
+          authApp,
+          new DocumentService(options.documentRepository, options.objectStore),
+          authService,
+        );
+      }
     });
   }
 
