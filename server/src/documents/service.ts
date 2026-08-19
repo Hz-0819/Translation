@@ -14,6 +14,7 @@ const ALLOWED_MIME_TYPES = new Set([
 
 export class InvalidDocumentError extends Error {}
 export class DocumentNotFoundError extends Error {}
+export class DocumentClaimConflictError extends Error {}
 export class UploadNotReadyError extends Error {}
 export class ObjectVerificationError extends Error {}
 
@@ -35,6 +36,20 @@ export class DocumentService {
   }) {
     if (!ALLOWED_MIME_TYPES.has(input.mimeType) || input.byteSize < 1 || input.byteSize > MAX_FILE_SIZE) {
       throw new InvalidDocumentError();
+    }
+
+    const existing = await this.repository.findDocumentUpload(input.documentId);
+    if (existing) {
+      const sameFile = existing.sha256 === input.sha256 &&
+        existing.byteSize === input.byteSize && existing.mimeType === input.mimeType;
+      if (existing.documentUserId !== input.userId || !sameFile) throw new DocumentClaimConflictError();
+      if (existing.status === "verified") return { objectId: existing.id, status: "verified" as const };
+      const signed = await this.objectStore.createUploadUrl({
+        objectKey: existing.objectKey,
+        mimeType: existing.mimeType,
+        sha256: existing.sha256,
+      });
+      return { objectId: existing.id, status: "pending" as const, ...signed };
     }
 
     const objectId = randomUUID();
@@ -64,7 +79,7 @@ export class DocumentService {
       mimeType: input.mimeType,
       sha256: input.sha256,
     });
-    return { objectId, ...signed };
+    return { objectId, status: "pending" as const, ...signed };
   }
 
   async commit(userId: string, documentId: string, objectId: string) {

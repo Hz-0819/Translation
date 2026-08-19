@@ -139,6 +139,20 @@ export class DocumentRepository {
     await completed;
   }
 
+  async getSetting(key) {
+    const database = await this.databasePromise;
+    const transaction = database.transaction(STORE_NAMES.settings, 'readonly');
+    return (await requestResult(transaction.objectStore(STORE_NAMES.settings).get(key)))?.value;
+  }
+
+  async setSetting(key, value) {
+    const database = await this.databasePromise;
+    const transaction = database.transaction(STORE_NAMES.settings, 'readwrite');
+    const completed = transactionComplete(transaction);
+    await requestResult(transaction.objectStore(STORE_NAMES.settings).put({ key, value, updatedAt: Date.now() }));
+    await completed;
+  }
+
   async applyRemoteOperations(operations, cursor) {
     const database = await this.databasePromise;
     const transaction = database.transaction([STORE_NAMES.operations, STORE_NAMES.syncState], 'readwrite');

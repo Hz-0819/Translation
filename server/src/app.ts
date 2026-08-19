@@ -24,6 +24,20 @@ type BuildAppOptions = {
   syncRepository?: SyncRepository;
 };
 
+function isAllowedWebOrigin(origin: string | undefined, config: AppConfig) {
+  if (!origin || origin === config.WEB_ORIGIN) return true;
+  if (config.NODE_ENV === "production") return false;
+  try {
+    const url = new URL(origin);
+    const privateHost = url.hostname === "localhost" || url.hostname === "127.0.0.1" ||
+      /^10\./.test(url.hostname) || /^192\.168\./.test(url.hostname) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(url.hostname);
+    return privateHost && url.port === "5173";
+  } catch {
+    return false;
+  }
+}
+
 export function buildApp(options: BuildAppOptions = {}) {
   const app = Fastify({ logger: false });
 
@@ -33,7 +47,7 @@ export function buildApp(options: BuildAppOptions = {}) {
     const { config, authRepository } = options;
     app.register(async (authApp) => {
       await authApp.register(cors, {
-        origin: config.WEB_ORIGIN,
+        origin: (origin, callback) => callback(null, isAllowedWebOrigin(origin, config)),
         credentials: true,
       });
       await authApp.register(cookie);

@@ -35,6 +35,48 @@ svg { width: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-l
 .upload-button { justify-self: end; display: flex; align-items: center; justify-content: center; gap: 9px; min-height: 42px; padding: 0 18px; border: 1px solid var(--ink); background: var(--ink); color: white; cursor: pointer; font-size: 13px; box-shadow: 4px 4px 0 var(--accent); transition: transform .18s, box-shadow .18s; }
 .upload-button:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 var(--accent); }
 .upload-button span { color: var(--accent); font: 20px 'DM Mono'; }
+.topbar-actions { justify-self: end; display: flex; align-items: center; gap: 9px; }
+.account-button { min-height: 42px; display: inline-flex; align-items: center; gap: 7px; padding: 0 12px; border: 1px solid var(--line); background: rgba(255,255,252,.7); color: var(--ink-soft); cursor: pointer; font-size: 10px; }
+.account-button .ph { font-size: 18px; }
+.account-button.signed-in { border-color: rgba(101,167,117,.45); color: var(--ink); }
+
+.account-overlay { z-index: 80; position: fixed; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(13,35,31,.38); backdrop-filter: blur(7px); }
+.account-dialog { width: min(520px, 100%); max-height: min(760px, calc(100dvh - 40px)); overflow: auto; padding: 28px; border: 1px solid rgba(23,60,54,.18); background: var(--paper); box-shadow: 0 28px 90px rgba(11,28,25,.26); }
+.account-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
+.account-dialog > header span { color: var(--ink-soft); font: 500 9px 'DM Mono'; letter-spacing: .18em; }
+.account-dialog > header h2 { margin: 7px 0 0; font-size: 23px; }
+.account-dialog > header button { width: 36px; height: 36px; border: 0; background: transparent; cursor: pointer; }
+.account-dialog > header .ph { font-size: 20px; }
+.auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin: 22px 0 20px; border-bottom: 1px solid var(--line); }
+.auth-tabs button { min-height: 38px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--ink-soft); cursor: pointer; font-size: 11px; }
+.auth-tabs button.active { border-bottom-color: var(--ink); color: var(--ink); font-weight: 700; }
+#authForm { display: grid; gap: 16px; }
+#authForm label { display: grid; gap: 7px; color: var(--ink-soft); font-size: 10px; }
+#authForm input { min-height: 44px; padding: 0 12px; border: 1px solid var(--line); outline: 0; background: #fff; color: var(--ink); font-size: 12px; }
+#authForm input:focus { border-color: var(--ink); box-shadow: 0 0 0 3px rgba(216,239,143,.45); }
+#authForm > button, .migration-actions button:last-child { min-height: 44px; border: 1px solid var(--ink); background: var(--ink); color: #fff; cursor: pointer; }
+#authForm > button:disabled, .migration-actions button:disabled { opacity: .55; cursor: wait; }
+#authError { min-height: 18px; margin: -4px 0; color: #a13232; font-size: 10px; }
+.privacy-note { margin: 16px 0 0; color: var(--ink-soft); font-size: 9px; line-height: 1.7; }
+.signed-in-row { display: flex; justify-content: space-between; gap: 14px; margin: 22px 0; padding: 13px 0; border-bottom: 1px solid var(--line); font-size: 10px; }
+.signed-in-row span { display: flex; align-items: center; gap: 6px; color: #477455; }
+.signed-in-row strong { overflow: hidden; text-overflow: ellipsis; }
+.migration-intro strong { font-size: 15px; }
+.migration-intro p, .sync-empty p { margin: 7px 0 16px; color: var(--ink-soft); font-size: 10px; line-height: 1.7; }
+.migration-list { display: grid; gap: 8px; max-height: 300px; overflow: auto; }
+.migration-list label { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--line); cursor: pointer; }
+.migration-list input { width: 17px; height: 17px; accent-color: var(--ink); }
+.migration-list strong, .migration-list small { display: block; }
+.migration-list strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.migration-list small { margin-top: 4px; color: var(--ink-soft); font-size: 9px; }
+.migration-list small[data-status="synced"] { color: #477455; }
+.migration-list small[data-status="failed"] { color: #a13232; }
+.migration-actions { display: grid; grid-template-columns: 1fr 1.35fr; gap: 9px; margin-top: 18px; }
+.migration-actions button { min-height: 44px; border: 1px solid var(--line); background: transparent; cursor: pointer; font-size: 10px; }
+.sync-empty { display: grid; place-items: center; padding: 38px 10px 24px; text-align: center; }
+.sync-empty .ph { margin-bottom: 10px; color: #5b8c67; font-size: 34px; }
+.sync-empty p { max-width: 290px; }
+.logout-button { width: 100%; min-height: 40px; margin-top: 18px; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--ink-soft); cursor: pointer; font-size: 10px; }
 
 .app-main { min-height: 0; overflow: hidden; }
 .topbar-center { min-width: 0; display: flex; align-items: center; justify-content: center; gap: 24px; }
@@ -509,6 +551,9 @@ body[data-mode="eraser"] .ink-layer { cursor: cell; }
   .topbar-center { justify-content: flex-start; }
   .primary-tabs button { padding-inline: 10px; }
   .doc-title { display: none; }
+  .topbar-actions { gap: 5px; }
+  .account-button { min-height: 36px; padding: 0 9px; }
+  .account-button span { display: none; }
   .upload-button { min-height: 36px; padding: 0 13px; }
   .upload-button { font-size: 0; }
   .upload-button span { font-size: 22px; }
@@ -555,6 +600,8 @@ body[data-mode="eraser"] .ink-layer { cursor: cell; }
   .page-thumbnail { grid-template-columns: 76px minmax(0,1fr) 28px; min-height: 122px; gap: 8px; }
   .preview-slot { width: 76px; height: 106px; }
   .mini-page-preview { width: 74px; height: 104px; }
+  .account-overlay { align-items: end; padding: 0; }
+  .account-dialog { width: 100%; max-height: 90dvh; padding: 22px 18px calc(22px + env(safe-area-inset-bottom)); border-width: 1px 0 0; border-radius: 18px 18px 0 0; }
 }
 
 @media (max-width: 360px) {

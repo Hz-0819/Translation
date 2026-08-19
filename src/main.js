@@ -12,6 +12,11 @@ import { bookmarkStorageKey, normalizeBookmarkIndexes } from './navigation.js';
 import { formatTimer, layerStorageKey, normalizeLayers, normalizePageNotes, noteStorageKey } from './study.js';
 import { addExcerpt, addMistakeEntry, addOutlineNode, createMistakeBook, defaultWorkspaceState, normalizeWorkspaceState, tracePageIndexes } from './workspace-state.js';
 import { createToolInstance, defaultToolInstances, normalizeToolInstances, toolDefinition, toolMode } from './tool-registry.js';
+import { AuthApi } from './auth/auth-api.js';
+import { AuthStore } from './auth/auth-store.js';
+import { DocumentUploadApi, GuestMigration } from './auth/guest-migration.js';
+import { SyncApiClient } from './sync/api-client.js';
+import { SyncEngine } from './sync/sync-engine.js';
 
 const icon = name => `<i class="ph ph-${name}" aria-hidden="true"></i>`;
 
@@ -23,7 +28,7 @@ document.querySelector('#app').innerHTML = `
         <nav class="primary-tabs" aria-label="主功能"><button data-app-view="library" class="active">${icon('folder-open')}<span>资料</span></button><button data-app-view="mistake-library">${icon('notebook')}<span>错题本</span></button></nav>
         <div class="doc-title" id="documentTitleBlock" hidden><span class="status-dot"></span><span id="docTitle">阅读练习 · Ways of Seeing</span><small id="saveState">仅保存在本机</small></div>
       </div>
-      <label class="upload-button"><input id="fileInput" type="file" accept=".pdf,.doc,.docx,image/png,image/jpeg" hidden><span>＋</span> 上传试卷</label>
+      <div class="topbar-actions"><button class="account-button" id="accountButton" aria-label="账号与同步">${icon('user-circle')}<span>登录</span></button><label class="upload-button"><input id="fileInput" type="file" accept=".pdf,.doc,.docx,image/png,image/jpeg" hidden><span>＋</span> 上传试卷</label></div>
     </header>
 
     <main class="app-main">
@@ -106,6 +111,17 @@ document.querySelector('#app').innerHTML = `
       </aside>
       </section>
     </main>
+    <section class="account-overlay" id="accountOverlay" hidden aria-modal="true" role="dialog" aria-labelledby="accountDialogTitle">
+      <div class="account-dialog">
+        <header><div><span>ACCOUNT & SYNC</span><h2 id="accountDialogTitle">登录后同步资料</h2></div><button id="closeAccountDialog" aria-label="关闭">${icon('x')}</button></header>
+        <div id="authPane">
+          <div class="auth-tabs"><button data-auth-mode="login" class="active">登录</button><button data-auth-mode="register">注册</button></div>
+          <form id="authForm"><label>邮箱<input id="authEmail" type="email" autocomplete="email" required placeholder="name@example.com"></label><label>密码<input id="authPassword" type="password" autocomplete="current-password" minlength="10" required placeholder="至少 10 位"></label><p id="authError" role="alert"></p><button type="submit" id="authSubmit">登录</button></form>
+          <p class="privacy-note">资料会先保存在当前设备；只有你明确选择后，才会上传到账号。</p>
+        </div>
+        <div id="migrationPane" hidden></div>
+      </div>
+    </section>
     <div class="toast" id="toast"></div>
   </div>`;
 
@@ -133,6 +149,11 @@ let timerInterval = null;
 const stack = document.querySelector('#paperStack');
 const panel = document.querySelector('#lookupPanel');
 const documentRepository = new DocumentRepository();
+const API_BASE_URL = location.port === '5173' ? `${location.protocol}//${location.hostname}:8787` : location.origin;
+const authStore = new AuthStore(new AuthApi({ baseUrl: API_BASE_URL }));
+const uploadApi = new DocumentUploadApi({ baseUrl: API_BASE_URL, getAccessToken: () => authStore.accessToken });
+const guestMigration = new GuestMigration({ repository: documentRepository, uploadApi });
+let syncEngine = null;
 let activeDocumentObjectUrls = [];
 
 function syncableDocumentId(value) {
@@ -1251,6 +1272,114 @@ async function importLocalFile(file, input) {
 
 document.querySelectorAll('#fileInput,[data-library-upload]').forEach(input => input.addEventListener('change', event => importLocalFile(event.target.files?.[0], input)));
 
+let authMode = 'login';
+
+function openAccountDialog() {
+  document.querySelector('#accountOverlay').hidden = false;
+  if (authStore.user) renderMigrationReview();
+  else renderAuthMode(authMode);
+}
+
+function closeAccountDialog() {
+  document.querySelector('#accountOverlay').hidden = true;
+}
+
+function renderAuthMode(mode) {
+  authMode = mode;
+  document.querySelector('#authPane').hidden = false;
+  document.querySelector('#migrationPane').hidden = true;
+  document.querySelectorAll('[data-auth-mode]').forEach(button => button.classList.toggle('active', button.dataset.authMode === mode));
+  const registering = mode === 'register';
+  document.querySelector('#authSubmit').textContent = registering ? '创建账号' : '登录';
+  document.querySelector('#accountDialogTitle').textContent = registering ? '创建同步账号' : '登录后同步资料';
+  document.querySelector('#authPassword').autocomplete = registering ? 'new-password' : 'current-password';
+  document.querySelector('#authError').textContent = '';
+}
+
+async function renderMigrationReview() {
+  const pane = document.querySelector('#migrationPane');
+  const candidates = await guestMigration.candidates(authStore.user.id);
+  document.querySelector('#authPane').hidden = true;
+  pane.hidden = false;
+  document.querySelector('#accountDialogTitle').textContent = '账号与资料同步';
+  pane.innerHTML = `<div class="signed-in-row"><span>${icon('check-circle')} 已登录</span><strong>${escapeHtml(authStore.user.email)}</strong></div>
+    ${candidates.length ? `<div class="migration-intro"><strong>将本机资料同步到此账号</strong><p>请选择需要跨设备使用的资料。未选资料会继续只保存在本机。</p></div><div class="migration-list">${candidates.map(document => `<label data-migration-document="${document.id}"><input type="checkbox" value="${document.id}" checked><span><strong>${escapeHtml(document.title)}</strong><small data-migration-status>等待同步</small></span></label>`).join('')}</div><div class="migration-actions"><button id="keepLocalButton">暂时仅保存在本机</button><button id="startMigrationButton">同步所选资料</button></div>` : `<div class="sync-empty">${icon('cloud-check')}<strong>当前资料已就绪</strong><p>已同步的资料仍保留本机副本，可以离线打开。</p></div>`}
+    <button class="logout-button" id="logoutButton">退出登录</button>`;
+  pane.querySelector('#keepLocalButton')?.addEventListener('click', closeAccountDialog);
+  pane.querySelector('#startMigrationButton')?.addEventListener('click', startSelectedMigration);
+  pane.querySelector('#logoutButton').addEventListener('click', async () => {
+    syncEngine?.stop(); syncEngine = null;
+    await authStore.logout(); closeAccountDialog(); toast('已退出登录，本机资料不受影响');
+  });
+}
+
+function migrationStatusText(status) {
+  return ({ hashing: '正在校验…', uploading: '正在上传…', verifying: '正在确认…', synced: '已同步', failed: '同步失败，可重试' })[status] || status;
+}
+
+async function startSelectedMigration() {
+  const button = document.querySelector('#startMigrationButton');
+  const documentIds = Array.from(document.querySelectorAll('[data-migration-document] input:checked'), input => input.value);
+  if (!documentIds.length) return toast('请先选择要同步的资料');
+  button.disabled = true;
+  try {
+    const results = await guestMigration.migrate({
+      userId: authStore.user.id,
+      documentIds,
+      onProgress: progress => {
+        const status = document.querySelector(`[data-migration-document="${progress.documentId}"] [data-migration-status]`);
+        if (status) { status.textContent = migrationStatusText(progress.status); status.dataset.status = progress.status; }
+      }
+    });
+    const failed = results.filter(result => result.status === 'failed').length;
+    if (failed) { button.disabled = false; button.textContent = '重试失败项'; toast(`${failed} 份资料同步失败，本机文件仍已保留`); }
+    else { toast('所选资料已同步，并保留了本机副本'); startCloudSync(); await renderMigrationReview(); }
+    await hydrateDocumentLibrary();
+  } catch (error) {
+    button.disabled = false;
+    toast(error.message || '资料同步失败');
+  }
+}
+
+function startCloudSync() {
+  if (syncEngine || !authStore.accessToken) return;
+  syncEngine = new SyncEngine({
+    api: new SyncApiClient({ baseUrl: API_BASE_URL, getAccessToken: () => authStore.accessToken }),
+    repository: documentRepository
+  });
+  syncEngine.start();
+}
+
+document.querySelector('#accountButton').addEventListener('click', openAccountDialog);
+document.querySelector('#closeAccountDialog').addEventListener('click', closeAccountDialog);
+document.querySelector('#accountOverlay').addEventListener('click', event => { if (event.target.id === 'accountOverlay') closeAccountDialog(); });
+document.querySelectorAll('[data-auth-mode]').forEach(button => button.addEventListener('click', () => renderAuthMode(button.dataset.authMode)));
+document.querySelector('#authForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  const submit = document.querySelector('#authSubmit');
+  const errorTarget = document.querySelector('#authError');
+  submit.disabled = true; errorTarget.textContent = '';
+  const credentials = {
+    email: document.querySelector('#authEmail').value,
+    password: document.querySelector('#authPassword').value,
+    deviceName: String(navigator.userAgentData?.platform || navigator.platform || '当前设备').slice(0, 120),
+    platform: String(navigator.userAgent || 'Web').slice(0, 80)
+  };
+  try {
+    if (authMode === 'register') await authStore.register(credentials);
+    else await authStore.login(credentials);
+    await renderMigrationReview();
+  } catch (error) {
+    errorTarget.textContent = error.message || '登录失败';
+  } finally { submit.disabled = false; }
+});
+
+authStore.subscribe(state => {
+  const button = document.querySelector('#accountButton');
+  button.classList.toggle('signed-in', state.authenticated);
+  button.querySelector('span').textContent = state.authenticated ? state.user.email.split('@')[0] : '登录';
+});
+
 async function hydrateDocumentLibrary() {
   try {
     const storedDocuments = await documentLibrary.listDocuments();
@@ -1266,4 +1395,8 @@ async function hydrateDocumentLibrary() {
   }
 }
 
-hydrateDocumentLibrary();
+Promise.all([hydrateDocumentLibrary(), authStore.bootstrap()]).then(async ([, auth]) => {
+  if (!auth.authenticated) return;
+  const candidates = await guestMigration.candidates(auth.user.id);
+  if (!candidates.length) startCloudSync();
+});

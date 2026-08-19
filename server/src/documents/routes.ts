@@ -5,6 +5,7 @@ import type { AuthService } from "../auth/service.js";
 import { authenticatedUserId } from "../auth/guard.js";
 import {
   DocumentNotFoundError,
+  DocumentClaimConflictError,
   DocumentService,
   InvalidDocumentError,
   ObjectVerificationError,
@@ -34,6 +35,9 @@ export function registerDocumentRoutes(app: FastifyInstance, service: DocumentSe
     } catch (error) {
       if (error instanceof InvalidDocumentError) {
         return reply.code(400).send({ message: "不支持的文件类型或文件过大" });
+      }
+      if (error instanceof DocumentClaimConflictError) {
+        return reply.code(409).send({ message: "资料已属于其他账号或文件内容不一致" });
       }
       throw error;
     }

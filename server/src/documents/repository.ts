@@ -9,7 +9,12 @@ export type PendingDocumentObject = {
   status: string;
 };
 
+export type ExistingDocumentUpload = PendingDocumentObject & {
+  documentUserId: string;
+};
+
 export interface DocumentRepository {
+  findDocumentUpload(documentId: string): Promise<ExistingDocumentUpload | null>;
   createPendingUpload(input: {
     document: {
       id: string;

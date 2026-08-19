@@ -18,6 +18,17 @@ const objectSelection = {
 export class PostgresDocumentRepository implements DocumentRepository {
   constructor(private readonly db: Database) {}
 
+  async findDocumentUpload(documentId: string) {
+    const [record] = await this.db
+      .select({ ...objectSelection, documentUserId: documents.userId })
+      .from(documents)
+      .innerJoin(documentObjects, eq(documentObjects.documentId, documents.id))
+      .where(and(eq(documents.id, documentId), isNull(documents.deletedAt), isNull(documentObjects.deletedAt)))
+      .orderBy(desc(documentObjects.version))
+      .limit(1);
+    return record ?? null;
+  }
+
   async createPendingUpload(input: {
     document: {
       id: string;
