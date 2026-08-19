@@ -31,18 +31,23 @@ export interface ObjectStore {
 
 export class S3ObjectStore implements ObjectStore {
   private readonly client: S3Client;
+  private readonly signingClient: S3Client;
   private readonly bucket: string;
 
   constructor(config: AppConfig) {
     this.bucket = config.S3_BUCKET;
-    this.client = new S3Client({
-      endpoint: config.S3_ENDPOINT,
+    const clientOptions = {
       region: config.S3_REGION,
       forcePathStyle: true,
       credentials: {
         accessKeyId: config.S3_ACCESS_KEY,
         secretAccessKey: config.S3_SECRET_KEY,
       },
+    };
+    this.client = new S3Client({ ...clientOptions, endpoint: config.S3_ENDPOINT });
+    this.signingClient = new S3Client({
+      ...clientOptions,
+      endpoint: config.S3_PUBLIC_ENDPOINT ?? config.S3_ENDPOINT,
     });
   }
 
@@ -71,7 +76,7 @@ export class S3ObjectStore implements ObjectStore {
       ContentType: input.mimeType,
       Metadata: { sha256: input.sha256 },
     });
-    const uploadUrl = await getSignedUrl(this.client, command, { expiresIn: 15 * 60 });
+    const uploadUrl = await getSignedUrl(this.signingClient, command, { expiresIn: 15 * 60 });
     return {
       uploadUrl,
       headers: {
@@ -108,7 +113,7 @@ export class S3ObjectStore implements ObjectStore {
 
   createDownloadUrl(objectKey: string) {
     return getSignedUrl(
-      this.client,
+      this.signingClient,
       new GetObjectCommand({ Bucket: this.bucket, Key: objectKey }),
       { expiresIn: 10 * 60 },
     );

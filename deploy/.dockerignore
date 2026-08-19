@@ -1,0 +1,13 @@
+.git
+.env
+node_modules
+dist
+release
+artifacts
+qa-assets
+tests
+docs
+scripts
+data/ecdict.csv
+design-qa*
+*.log

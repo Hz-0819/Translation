@@ -11,6 +11,8 @@ import type { AppConfig } from "./config.js";
 import { registerDocumentRoutes } from "./documents/routes.js";
 import type { DocumentRepository } from "./documents/repository.js";
 import { DocumentService } from "./documents/service.js";
+import { registerDictionaryRoutes } from "./dictionary/routes.js";
+import type { DictionaryStore } from "./dictionary/store.js";
 import type { ObjectStore } from "./storage/object-store.js";
 import { registerSyncRoutes } from "./sync/routes.js";
 import type { SyncRepository } from "./sync/repository.js";
@@ -26,6 +28,7 @@ type BuildAppOptions = {
   objectStore?: ObjectStore;
   syncRepository?: SyncRepository;
   usageRepository?: UsageRepository;
+  dictionaryStore?: DictionaryStore;
 };
 
 function isAllowedWebOrigin(origin: string | undefined, config: AppConfig) {
@@ -46,6 +49,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   const app = Fastify({ logger: false });
 
   app.get("/api/health", async () => ({ status: "ok" }));
+  if (options.dictionaryStore) registerDictionaryRoutes(app, options.dictionaryStore);
 
   if (options.config && options.authRepository) {
     const { config, authRepository } = options;

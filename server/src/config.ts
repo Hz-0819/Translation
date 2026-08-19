@@ -8,6 +8,7 @@ const configSchema = z.object({
   WEB_ORIGIN: z.string().url().default("http://localhost:5173"),
   DATABASE_URL: z.string().min(1),
   S3_ENDPOINT: z.string().url(),
+  S3_PUBLIC_ENDPOINT: z.string().url().optional(),
   S3_REGION: z.string().min(1).default("us-east-1"),
   S3_BUCKET: z.string().min(1),
   S3_ACCESS_KEY: z.string().min(1),
@@ -15,6 +16,8 @@ const configSchema = z.object({
   JWT_SECRET: z.string().min(32),
   ACCESS_TOKEN_TTL_MINUTES: z.coerce.number().int().positive().default(15),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(30),
+  COOKIE_SECURE: z.enum(["true", "false"]).transform(value => value === "true").optional(),
+  DICTIONARY_PATH: z.string().min(1).optional(),
 });
 
 export type AppConfig = z.infer<typeof configSchema>;

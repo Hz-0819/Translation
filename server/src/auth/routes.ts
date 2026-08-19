@@ -26,7 +26,7 @@ function setRefreshCookie(reply: FastifyReply, token: string, config: AppConfig)
     path: "/api/auth",
     httpOnly: true,
     sameSite: "strict",
-    secure: config.NODE_ENV === "production",
+    secure: config.COOKIE_SECURE ?? config.NODE_ENV === "production",
     maxAge: config.REFRESH_TOKEN_TTL_DAYS * 86_400,
   });
 }
@@ -36,7 +36,7 @@ function clearRefreshCookie(reply: FastifyReply, config: AppConfig) {
     path: "/api/auth",
     httpOnly: true,
     sameSite: "strict",
-    secure: config.NODE_ENV === "production",
+    secure: config.COOKIE_SECURE ?? config.NODE_ENV === "production",
   });
 }
 
