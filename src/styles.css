@@ -132,7 +132,7 @@ svg { width: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-l
 .new-book-form input { flex: 1; min-height: 38px; padding: 0 10px; border: 0; border-bottom: 1px solid var(--ink); outline: 0; background: transparent; }
 .new-book-form button { min-height: 38px; padding: 0 14px; border: 1px solid var(--ink); background: var(--ink); color: #fff; cursor: pointer; }
 
-.workspace { min-height: 0; display: grid; grid-template-columns: 76px minmax(0, 1fr) 320px; }
+.workspace { height: 100%; min-height: 0; display: grid; grid-template-columns: 76px minmax(0, 1fr) 320px; overflow: hidden; }
 .toolrail { z-index: 15; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 18px 10px; border-right: 1px solid var(--line); background: #f7f5ef; }
 .tool { width: 56px; min-height: 58px; display: grid; place-items: center; align-content: center; gap: 4px; border: 0; background: transparent; color: var(--ink-soft); cursor: pointer; border-radius: 3px; }
 .tool span { font-size: 10px; }
@@ -177,6 +177,10 @@ body[data-mode="pan"] .ink-layer, body[data-mode="pan"] .selectable-content { po
 .sample-paper footer { position: absolute; bottom: 3.7%; left: 8%; right: 8%; display: flex; justify-content: space-between; padding-top: 8px; border-top: 1px solid #c8ccc9; color: #71817b; font: 8px 'DM Mono'; letter-spacing: .1em; }
 
 .pdf-canvas, .uploaded-image { display: block; width: 100%; height: 100%; object-fit: contain; }
+.pdf-page { contain: layout paint; overflow-anchor: none; }
+.pdf-page[data-render-state="idle"] .pdf-canvas,
+.pdf-page[data-render-state="rendering"] .pdf-canvas { background: linear-gradient(110deg, #f7f6f1 20%, #efeee8 38%, #f7f6f1 56%); background-size: 220% 100%; animation: pdf-page-loading 1.2s linear infinite; }
+@keyframes pdf-page-loading { to { background-position-x: -220%; } }
 .pdf-text-layer { position: absolute; z-index: 3; inset: 0; transform-origin: 0 0; opacity: .01; }
 .pdf-text-layer span { position: absolute; transform-origin: 0 0; white-space: pre; color: transparent; }
 .page-error { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 10px; background: repeating-linear-gradient(-45deg, #f4f1e8, #f4f1e8 12px, #efebe1 12px, #efebe1 24px); text-align: center; }

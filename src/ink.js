@@ -189,14 +189,31 @@ export function createInkLayer(canvas, storageKey, getTool, onChange = () => {})
   listen(window, 'mousemove', event => move(event.clientX, event.clientY, 'mouse'));
   listen(window, 'mouseup', () => finish('mouse'));
   let observer = null;
+  let visibilityObserver = null;
+  let isNearViewport = typeof IntersectionObserver !== 'function';
+  const releaseBitmap = () => {
+    if (active) return;
+    canvas.width = 1;
+    canvas.height = 1;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+  };
   if (typeof ResizeObserver === 'function') {
-    observer = new ResizeObserver(resize);
+    observer = new ResizeObserver(() => { if (isNearViewport) resize(); });
     observer.observe(canvas);
   } else {
-    listen(window, 'resize', resize);
-    listen(window, 'orientationchange', resize);
+    listen(window, 'resize', () => { if (isNearViewport) resize(); });
+    listen(window, 'orientationchange', () => { if (isNearViewport) resize(); });
   }
-  resize();
+  if (typeof IntersectionObserver === 'function') {
+    visibilityObserver = new IntersectionObserver(entries => {
+      const visible = entries.some(entry => entry.isIntersecting);
+      if (visible === isNearViewport) return;
+      isNearViewport = visible;
+      if (visible) resize();
+      else releaseBitmap();
+    }, { root: canvas.closest('.desk'), rootMargin: '140% 0px', threshold: .01 });
+    visibilityObserver.observe(canvas);
+  } else resize();
 
   return {
     clear(layerId = null) {
@@ -268,6 +285,6 @@ export function createInkLayer(canvas, storageKey, getTool, onChange = () => {})
       return true;
     },
     redraw() { draw(); },
-    destroy() { observer?.disconnect(); removers.forEach(remove => remove()); }
+    destroy() { observer?.disconnect(); visibilityObserver?.disconnect(); removers.forEach(remove => remove()); }
   };
 }

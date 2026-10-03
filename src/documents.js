@@ -14,6 +14,7 @@ export function createBlankPage(id = `notes-${Date.now()}`) {
 }
 
 export function renderSample(container) {
+  releaseDocumentRenderer();
   container.replaceChildren();
   const content = `
     <div class="sample-paper selectable-content">
@@ -61,10 +62,30 @@ function buildTextLayer(pdfjsLib, page, viewport, container) {
       const measured = span.getBoundingClientRect().width || 1;
       if (item.width) span.style.transform = `scaleX(${(item.width * viewport.scale) / measured})`;
     }
+    return items.map(item => item.str || '').join(' ').replace(/\s+/g, ' ').trim();
   });
 }
 
+let activePdfSession = null;
+
+export function releaseDocumentRenderer() {
+  activePdfSession?.dispose();
+  activePdfSession = null;
+}
+
+function releasePdfPage(task) {
+  if (task.state !== 'rendered' || task.number === 1) return;
+  const canvas = task.page.querySelector('.pdf-canvas');
+  const textLayer = task.page.querySelector('.pdf-text-layer');
+  canvas.width = 1;
+  canvas.height = 1;
+  textLayer.replaceChildren();
+  task.state = 'idle';
+  task.page.dataset.renderState = 'idle';
+}
+
 export async function renderPdf(file, container, onProgress = () => {}) {
+  releaseDocumentRenderer();
   onProgress('正在载入 PDF 引擎…');
   await ensureWebStreams();
   const [pdfjsLib, workerModule] = await Promise.all([
@@ -82,33 +103,23 @@ export async function renderPdf(file, container, onProgress = () => {}) {
   }).promise;
   const failedPages = [];
   const textLayerFallbacks = [];
+  const tasks = [];
   for (let number = 1; number <= pdf.numPages; number += 1) {
     let page;
     try {
-      onProgress(`正在整理第 ${number} / ${pdf.numPages} 页`);
+      onProgress(`正在建立第 ${number} / ${pdf.numPages} 页`);
       const pdfPage = await pdf.getPage(number);
       const base = pdfPage.getViewport({ scale: 1 });
       const scale = 1000 / base.width;
       const viewport = pdfPage.getViewport({ scale });
       page = pageShell('<canvas class="pdf-canvas"></canvas><div class="pdf-text-layer selectable-content"></div>', `pdf-${number}`, 'pdf-page');
       page.style.aspectRatio = `${viewport.width} / ${viewport.height}`;
-      const canvas = page.querySelector('.pdf-canvas');
       const textLayer = page.querySelector('.pdf-text-layer');
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
       textLayer.style.width = `${viewport.width}px`;
       textLayer.style.height = `${viewport.height}px`;
+      page.dataset.renderState = 'idle';
       container.append(page);
-      await pdfPage.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-      try {
-        await buildTextLayer(pdfjsLib, pdfPage, viewport, textLayer);
-      } catch (error) {
-        if (!isReadableStreamError(error)) throw error;
-        textLayerFallbacks.push(number);
-        textLayer.replaceChildren();
-        textLayer.classList.add('text-layer-unavailable');
-        console.warn(`PDF page ${number}: text layer disabled on this browser`, error);
-      }
+      tasks.push({ number, page, pdfPage, viewport, state: 'idle', releaseTimer: null });
     } catch (error) {
       failedPages.push(number);
       page?.remove();
@@ -118,6 +129,73 @@ export async function renderPdf(file, container, onProgress = () => {}) {
     }
   }
   if (failedPages.length === pdf.numPages) throw new Error('PDF 的所有页面均无法显示');
+
+  let disposed = false;
+  const renderTask = async task => {
+    if (disposed || task.state === 'rendered' || task.state === 'rendering') return;
+    clearTimeout(task.releaseTimer);
+    task.state = 'rendering';
+    task.page.dataset.renderState = 'rendering';
+    const canvas = task.page.querySelector('.pdf-canvas');
+    const textLayer = task.page.querySelector('.pdf-text-layer');
+    canvas.width = Math.max(1, Math.round(task.viewport.width));
+    canvas.height = Math.max(1, Math.round(task.viewport.height));
+    try {
+      await task.pdfPage.render({ canvasContext: canvas.getContext('2d'), viewport: task.viewport }).promise;
+      try {
+        textLayer.replaceChildren();
+        task.page.dataset.searchText = await buildTextLayer(pdfjsLib, task.pdfPage, task.viewport, textLayer);
+      } catch (error) {
+        if (!isReadableStreamError(error)) throw error;
+        textLayerFallbacks.push(task.number);
+        textLayer.replaceChildren();
+        textLayer.classList.add('text-layer-unavailable');
+        console.warn(`PDF page ${task.number}: text layer disabled on this browser`, error);
+      }
+      task.state = 'rendered';
+      task.page.dataset.renderState = 'rendered';
+    } catch (error) {
+      task.state = 'failed';
+      task.page.dataset.renderState = 'failed';
+      failedPages.push(task.number);
+      task.page.querySelector('.pdf-canvas')?.remove();
+      textLayer.replaceChildren();
+      const failure = document.createElement('div');
+      failure.className = 'page-error';
+      failure.innerHTML = `<b>第 ${task.number} 页暂时无法显示</b><span>${isReadableStreamError(error) ? '当前浏览器缺少 PDF 流式读取能力' : '该页包含暂不支持的 PDF 内容'}</span>`;
+      task.page.prepend(failure);
+      console.warn(`PDF page ${task.number}: render failed`, error);
+    }
+  };
+
+  // The first page is ready before the document opens. Remaining pages keep
+  // their final aspect-ratio as lightweight placeholders, so scrolling never
+  // jumps while nearby canvases are rendered on demand.
+  if (tasks[0]) await renderTask(tasks[0]);
+  let observer = null;
+  if (typeof IntersectionObserver === 'function') {
+    observer = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        const task = tasks.find(item => item.page === entry.target);
+        if (!task) continue;
+        clearTimeout(task.releaseTimer);
+        if (entry.isIntersecting) renderTask(task);
+        else if (task.number !== 1) task.releaseTimer = setTimeout(() => releasePdfPage(task), 1200);
+      }
+    }, { root: container.closest('.desk'), rootMargin: '140% 0px', threshold: .01 });
+    tasks.forEach(task => observer.observe(task.page));
+  } else {
+    // Older browsers keep the compatible eager path.
+    for (const task of tasks.slice(1)) await renderTask(task);
+  }
+  activePdfSession = {
+    dispose() {
+      disposed = true;
+      observer?.disconnect();
+      tasks.forEach(task => clearTimeout(task.releaseTimer));
+      pdf.destroy?.().catch?.(() => {});
+    }
+  };
   return { type: 'pdf', pages: pdf.numPages, title: file.name, failedPages, textLayerFallbacks };
 }
 
@@ -172,6 +250,7 @@ function wordPageShell(content, id, height) {
 }
 
 export async function renderWord(file, container) {
+  releaseDocumentRenderer();
   const { renderAsync: renderDocx } = await import('docx-preview');
   container.replaceChildren();
   const holder = document.createElement('div');
@@ -245,6 +324,7 @@ export async function renderWord(file, container) {
 }
 
 export async function renderImage(file, container) {
+  releaseDocumentRenderer();
   container.replaceChildren();
   const url = URL.createObjectURL(file);
   const img = new Image();

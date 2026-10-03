@@ -1,7 +1,7 @@
 import './styles.css';
 import '@phosphor-icons/web/regular';
 import html2canvas from 'html2canvas';
-import { classifyDocumentFile, createBlankPage, renderLocalFile, renderSample } from './documents.js';
+import { classifyDocumentFile, createBlankPage, releaseDocumentRenderer, renderLocalFile, renderSample } from './documents.js';
 import { DocumentLibrary, mergeDocumentCatalog } from './document-library.js';
 import { DocumentRepository } from './storage/document-repository.js';
 import { createInkLayer } from './ink.js';
@@ -318,6 +318,7 @@ async function openResource(id, pageIndex = 0) {
 
 function createBlankResource() {
   releaseDocumentObjectUrls();
+  releaseDocumentRenderer();
   const id = `blank-${Date.now()}`;
   const title = `空白笔记 ${new Date().toLocaleDateString('zh-CN')}`;
   stack.replaceChildren(createBlankPage(`${id}-1`));
@@ -768,7 +769,7 @@ function renderOutline() {
 }
 
 function pageSearchText(page) {
-  return (page.innerText || page.textContent || '').replace(/\s+/g, ' ').trim();
+  return (page.dataset.searchText || page.innerText || page.textContent || '').replace(/\s+/g, ' ').trim();
 }
 
 function renderSearchResults(query) {
